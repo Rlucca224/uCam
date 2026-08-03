@@ -1,1 +1,4 @@
+__pycache__/
+*.pyc
 recordings/
+viewer/fonts/*.ttf
