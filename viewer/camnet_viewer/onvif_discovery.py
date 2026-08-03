@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -11,9 +12,16 @@ logger = logging.getLogger("camnet.viewer")
 
 try:
     from onvif import ONVIFCamera
+    import onvif as _onvif_pkg
+
+    _ONVIF_DIR = os.path.dirname(_onvif_pkg.__file__)
+    _WSDL_DIR = os.path.join(os.path.dirname(_ONVIF_DIR), "wsdl")
+    if not os.path.isdir(_WSDL_DIR):
+        _WSDL_DIR = os.path.join(_ONVIF_DIR, "wsdl")
 except Exception as exc:  # pragma: no cover - se detecta en runtime
     logger.warning("onvif-zeep no disponible: %s", exc)
     ONVIFCamera = None
+    _WSDL_DIR = ""
 
 
 @dataclass
@@ -87,7 +95,8 @@ def discover_onvif_streams(
     host, port = _parse_endpoint(endpoint)
     logger.info("ONVIF: conectando a %s:%d", host, port)
 
-    cam = ONVIFCamera(host, port, user, password, wsdl_dir=None)
+    wsdl_dir = _WSDL_DIR if _WSDL_DIR and os.path.isdir(_WSDL_DIR) else None
+    cam = ONVIFCamera(host, port, user, password, wsdl_dir=wsdl_dir)
     cam.update_xaddrs()
     media = cam.create_media_service()
 
