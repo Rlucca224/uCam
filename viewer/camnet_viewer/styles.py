@@ -303,7 +303,7 @@ window, .content-area {
   background-color: #2A2A2A;
   border: 1px solid #262626;
   border-radius: 8px;
-  min-height: 220px;
+  min-height: 150px;
 }
 
 .camera-list-preview-box {
@@ -314,14 +314,14 @@ window, .content-area {
 
 .camera-list-feed {
   background-color: #0a0a0a;
-  min-height: 180px;
+  min-height: 120px;
   border-radius: 0 0 0 8px;
 }
 
 .camera-list-detail {
   background-color: #2A2A2A;
   border-radius: 0 8px 8px 0;
-  padding: 8px 8px;
+  padding: 4px 4px;
 }
 
 .camera-list-detail-title {

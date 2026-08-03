@@ -392,7 +392,7 @@ class CameraListRow(Gtk.Box):
         self.camera = camera
         self.set_hexpand(True)
         self.set_vexpand(False)
-        self.set_size_request(-1, 220)
+        self.set_size_request(-1, 155)
         self.set_overflow(Gtk.Overflow.HIDDEN)
 
         self.add_css_class("camera-list-row")
@@ -408,17 +408,17 @@ class CameraListRow(Gtk.Box):
 
         # --- Left: preview ---
         left_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        left_box.set_size_request(400, -1)
+        left_box.set_size_request(320, -1)
         left_box.set_hexpand(False)
         left_box.set_vexpand(False)
         left_box.add_css_class("camera-list-preview-box")
         self.append(left_box)
 
         top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        top_bar.set_margin_start(8)
-        top_bar.set_margin_end(8)
-        top_bar.set_margin_top(8)
-        top_bar.set_margin_bottom(6)
+        top_bar.set_margin_start(4)
+        top_bar.set_margin_end(4)
+        top_bar.set_margin_top(4)
+        top_bar.set_margin_bottom(2)
         top_bar.set_valign(Gtk.Align.START)
         top_bar.set_halign(Gtk.Align.FILL)
         left_box.append(top_bar)
@@ -460,7 +460,7 @@ class CameraListRow(Gtk.Box):
         main_child = Gtk.Box()
         main_child.set_hexpand(True)
         main_child.set_vexpand(True)
-        main_child.set_size_request(360, 180)
+        main_child.set_size_request(290, 130)
         overlay.set_child(main_child)
 
         overlay.add_overlay(self._player.picture)
@@ -480,10 +480,10 @@ class CameraListRow(Gtk.Box):
         detail.set_hexpand(True)
         detail.set_vexpand(True)
         detail.add_css_class("camera-list-detail")
-        detail.set_margin_start(8)
-        detail.set_margin_end(8)
-        detail.set_margin_top(10)
-        detail.set_margin_bottom(10)
+        detail.set_margin_start(4)
+        detail.set_margin_end(6)
+        detail.set_margin_top(4)
+        detail.set_margin_bottom(4)
         self.append(detail)
 
         self._detail_name = Gtk.Label(label=self.camera.name)
@@ -495,12 +495,12 @@ class CameraListRow(Gtk.Box):
         self._detail_url.add_css_class("camera-list-detail-subtitle")
         self._detail_url.set_halign(Gtk.Align.START)
         self._detail_url.set_ellipsize(2)
-        self._detail_url.set_margin_bottom(4)
+        self._detail_url.set_margin_bottom(2)
         detail.append(self._detail_url)
 
         spacer_top = Gtk.Box()
         spacer_top.set_vexpand(True)
-        spacer_top.set_size_request(-1, 6)
+        spacer_top.set_size_request(-1, 2)
         detail.append(spacer_top)
 
         info_grid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -819,7 +819,7 @@ class CameraGrid(Gtk.Box):
         self._flow.set_halign(Gtk.Align.START)
         self._flow.add_css_class("camera-flow")
 
-        self._list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._list_box.set_margin_start(12)
         self._list_box.set_margin_end(12)
         self._list_box.set_margin_top(8)
