@@ -9,7 +9,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gst", "1.0")
 
-from gi.repository import Gtk, Gst  # noqa: E402
+from gi.repository import Gtk, Gst, GLib  # noqa: E402
 
 from .models import CameraConfig, CameraStatus, CameraState
 from .pipeline import build_pipeline
@@ -60,6 +60,10 @@ class CameraCard(Gtk.Box):
         self.set_overflow(Gtk.Overflow.HIDDEN)
 
         self.add_css_class("camera-card")
+
+        self._reconnect_delay = 1
+        self._reconnect_max_delay = 30
+        self._reconnect_source: int | None = None
 
         self._build_ui()
         self._start_stream()
@@ -197,12 +201,12 @@ class CameraCard(Gtk.Box):
 
     def _on_bus_error(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         err, _debug = msg.parse_error()
-        logger.error("[%s] %s", self.camera.name, err.message)
-        self._update_status_ui(CameraStatus.ERROR)
+        logger.warning("[%s] %s", self.camera.name, err.message)
+        self._schedule_reconnect()
 
     def _on_bus_eos(self, _bus: Gst.Bus, _msg: Gst.Message) -> None:
         logger.info("[%s] End of stream", self.camera.name)
-        self._update_status_ui(CameraStatus.NO_SIGNAL)
+        self._schedule_reconnect()
 
     def _on_bus_state_changed(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         if msg.src != self.state.pipeline:
@@ -210,13 +214,42 @@ class CameraCard(Gtk.Box):
         _old, new, _pending = msg.parse_state_changed()
         if new == Gst.State.PLAYING:
             self._update_status_ui(CameraStatus.LIVE)
+            self._reconnect_delay = 1
         elif new == Gst.State.NULL:
             self._update_status_ui(CameraStatus.NO_SIGNAL)
 
-    def stop(self) -> None:
+    def _schedule_reconnect(self) -> None:
+        if self._reconnect_source is not None:
+            return
+        if self._reconnect_delay >= self._reconnect_max_delay:
+            self._update_status_ui(CameraStatus.ERROR)
+            self._reconnect_delay = self._reconnect_max_delay
+        else:
+            self._update_status_ui(CameraStatus.CONNECTING)
+        self._reconnect_source = GLib.timeout_add_seconds(
+            self._reconnect_delay, self._do_reconnect
+        )
+
+    def _do_reconnect(self) -> bool:
+        self._reconnect_source = None
+        self._stop_pipeline()
+        self._update_status_ui(CameraStatus.CONNECTING)
+        self._reconnect_delay = min(self._reconnect_delay * 2, self._reconnect_max_delay)
+        self._start_stream()
+        return False
+
+    def _stop_pipeline(self) -> None:
         if self.state.pipeline is not None:
+            bus = self.state.pipeline.get_bus()
+            bus.remove_signal_watch()
             self.state.pipeline.set_state(Gst.State.NULL)
             self.state.pipeline = None
+
+    def stop(self) -> None:
+        if self._reconnect_source is not None:
+            GLib.source_remove(self._reconnect_source)
+            self._reconnect_source = None
+        self._stop_pipeline()
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +326,8 @@ class Sidebar(Gtk.Box):
             ("dashboard", "Dashboard", False),
             ("videocam", "Cameras", True),
             ("video_library", "Recordings", False),
-            ("event", "Events", False),
-            ("linked_camera", "Camera Management", False),
+            ("warning", "Events", False),
+            ("tune", "Camera Management", False),
         ]
         for icon, label, active in items:
             css = "nav-item-active" if active else "nav-item"
