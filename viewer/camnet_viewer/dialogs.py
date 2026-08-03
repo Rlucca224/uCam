@@ -254,6 +254,7 @@ class AddCameraDialog(Gtk.Window):
 
         self._onvif_profiles: list[StreamProfile] = []
         self._onvif_preview_pipeline: Gst.Pipeline | None = None
+        self._onvif_start_id: int | None = None
 
         # Buttons
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -436,7 +437,7 @@ class AddCameraDialog(Gtk.Window):
 
         self._profiles_dropdown.set_selected(0)
         self._update_onvif_info(0)
-        self._start_onvif_preview_with_profile(0)
+        self._onvif_start_id = GLib.idle_add(self._start_onvif_preview_with_profile, 0)
 
     def _selected_onvif_url(self) -> str:
         idx = self._profiles_dropdown.get_selected()
@@ -448,9 +449,15 @@ class AddCameraDialog(Gtk.Window):
         idx = dropdown.get_selected()
         if idx < 0 or idx >= len(self._onvif_profiles):
             return
+        self._cancel_onvif_preview_start()
         self._stop_onvif_preview_pipeline()
         self._update_onvif_info(idx)
-        self._start_onvif_preview_with_profile(idx)
+        self._onvif_start_id = GLib.idle_add(self._start_onvif_preview_with_profile, idx)
+
+    def _cancel_onvif_preview_start(self) -> None:
+        if self._onvif_start_id is not None:
+            GLib.source_remove(self._onvif_start_id)
+            self._onvif_start_id = None
 
     def _update_onvif_info(self, idx: int) -> None:
         p = self._onvif_profiles[idx]
@@ -458,8 +465,12 @@ class AddCameraDialog(Gtk.Window):
         self._onvif_codec_label.set_label(f"Codec: {p.encoding or '--'}")
         self._onvif_fps_label.set_label(f"FPS: {p.fps or '--'}")
 
-    def _start_onvif_preview_with_profile(self, idx: int) -> None:
+    def _start_onvif_preview_with_profile(self, idx: int) -> bool:
+        self._onvif_start_id = None
+        if not self._onvif_profiles or idx >= len(self._onvif_profiles):
+            return False
         url = self._onvif_profiles[idx].url
+        logger.info("ONVIF preview: start %s", url)
         self._onvif_preview_status.set_label("Connecting…")
         self._onvif_preview_area.set_visible(True)
 
@@ -468,7 +479,7 @@ class AddCameraDialog(Gtk.Window):
         except RuntimeError as exc:
             self._onvif_preview_status.set_label(f"Error: {exc}")
             self._onvif_preview_pipeline = None
-            return
+            return False
 
         sink = self._onvif_preview_pipeline.get_by_name("sink")
         paintable = sink.get_property("paintable")
@@ -484,6 +495,7 @@ class AddCameraDialog(Gtk.Window):
         bus.connect("message::state-changed", self._on_onvif_preview_state)
 
         self._onvif_preview_pipeline.set_state(Gst.State.PLAYING)
+        return False
 
     def _on_onvif_preview_paintable(self, sink, _pspec) -> None:
         paintable = sink.get_property("paintable")
@@ -493,18 +505,21 @@ class AddCameraDialog(Gtk.Window):
 
     def _on_onvif_preview_error(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         err, _debug = msg.parse_error()
+        logger.warning("ONVIF preview error: %s", err.message)
         self._onvif_preview_status.set_label(f"Error: {err.message}")
 
     def _on_onvif_preview_state(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         if msg.src != self._onvif_preview_pipeline:
             return
         _old, new, _pending = msg.parse_state_changed()
+        logger.info("ONVIF preview state: %s", new.value_name)
         if new == Gst.State.PLAYING:
             self._onvif_preview_status.set_label("Connected")
         elif new == Gst.State.NULL:
             self._onvif_preview_status.set_label("Disconnected")
 
     def _stop_onvif_preview(self) -> None:
+        self._cancel_onvif_preview_start()
         self._stop_onvif_preview_pipeline()
         self._profiles_box.set_visible(False)
         self._onvif_info_grid.set_visible(False)
@@ -516,6 +531,7 @@ class AddCameraDialog(Gtk.Window):
 
     def _stop_onvif_preview_pipeline(self) -> None:
         if self._onvif_preview_pipeline is not None:
+            logger.info("ONVIF preview: stop")
             self._onvif_preview_picture.set_paintable(None)
             self._onvif_preview_pipeline.set_state(Gst.State.NULL)
             self._onvif_preview_pipeline.get_state(Gst.CLOCK_TIME_NONE)
