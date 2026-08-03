@@ -90,7 +90,7 @@ class AddCameraDialog(Gtk.Window):
         preview_btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         preview_btn_row.set_halign(Gtk.Align.CENTER)
         preview_btn_row.set_hexpand(False)
-        self._preview_btn = Gtk.Button(label="Preview")
+        self._preview_btn = Gtk.Button(label="Get Preview")
         self._preview_btn.add_css_class("dialog-btn-preview")
         self._preview_btn.connect("clicked", self._on_preview_clicked)
         self._preview_btn.set_visible(False)
@@ -177,7 +177,7 @@ class AddCameraDialog(Gtk.Window):
         onvif_preview_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         onvif_preview_row.set_halign(Gtk.Align.CENTER)
         onvif_preview_row.set_hexpand(False)
-        onvif_preview_btn = Gtk.Button(label="Preview")
+        onvif_preview_btn = Gtk.Button(label="Get Preview")
         onvif_preview_btn.add_css_class("dialog-btn-preview")
         onvif_preview_btn.set_visible(False)
         onvif_preview_btn.connect("clicked", lambda _b: self._on_onvif_preview())
@@ -394,7 +394,7 @@ class AddCameraDialog(Gtk.Window):
             self._preview_pipeline.get_state(Gst.SECOND)
             self._preview_pipeline = None
         self._preview_area.set_visible(False)
-        self._preview_btn.set_label("Preview")
+        self._preview_btn.set_label("Get Preview")
         self._preview_status.set_label("")
 
     def _on_onvif_preview(self) -> None:
@@ -553,7 +553,7 @@ class AddCameraDialog(Gtk.Window):
         self._onvif_info_grid.set_visible(False)
         self._onvif_preview_area.set_visible(False)
         self._onvif_preview_msg.set_label("")
-        self._onvif_preview_btn.set_label("Preview")
+        self._onvif_preview_btn.set_label("Get Preview")
         self._onvif_profiles = []
         self._current_preview_idx = -1
         self._profiles_model.splice(0, self._profiles_model.get_n_items(), [])
