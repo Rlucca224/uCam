@@ -300,7 +300,7 @@ window, .content-area {
 }
 
 .camera-list-row {
-  background-color: #131313;
+  background-color: #2A2A2A;
   border: 1px solid #262626;
   border-radius: 8px;
   min-height: 220px;
@@ -318,8 +318,54 @@ window, .content-area {
   border-radius: 0 0 0 8px;
 }
 
-.camera-list-spacer {
-  background-color: #131313;
+.camera-list-detail {
+  background-color: #2A2A2A;
+  border-radius: 0 8px 8px 0;
+  padding: 8px 8px;
+}
+
+.camera-list-detail-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.camera-list-detail-subtitle {
+  font-size: 10px;
+  font-weight: 500;
+  color: #666666;
+}
+
+.camera-list-info-grid {
+  background-color: #1f1f1f;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.camera-list-info-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #666666;
+}
+
+.camera-list-info-value {
+  font-size: 10px;
+  font-weight: 500;
+  color: #A1A1A1;
+}
+
+.camera-list-action-btn {
+  background: none;
+  border: 1px solid #333333;
+  color: #A1A1A1;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.camera-list-action-btn:hover {
+  border-color: #555555;
+  color: #FFFFFF;
+  background-color: #1f1f1f;
 }
 
 /* ===== Dialog ===== */

@@ -54,10 +54,12 @@ class CameraPlayer:
         self,
         camera: CameraConfig,
         on_status: object | None = None,
+        on_info: object | None = None,
     ) -> None:
         self.camera = camera
         self.state = CameraState(config=camera)
         self._on_status = on_status
+        self._on_info = on_info
 
         self._reconnect_delay = 1
         self._reconnect_max_delay = 30
@@ -70,15 +72,102 @@ class CameraPlayer:
         self._picture.set_halign(Gtk.Align.FILL)
         self._picture.set_valign(Gtk.Align.FILL)
 
+        self._resolution = "--"
+        self._fps_str = "--"
+        self._codec = "--"
+        self._start_time: float | None = None
+
     @property
     def picture(self) -> Gtk.Picture:
         return self._picture
 
+    @property
+    def resolution(self) -> str:
+        return self._resolution
+
+    @property
+    def fps(self) -> str:
+        return self._fps_str
+
+    @property
+    def codec(self) -> str:
+        return self._codec
+
+    @property
+    def uptime_seconds(self) -> int:
+        if self._start_time is None:
+            return 0
+        import time
+        return int(time.time() - self._start_time)
+
+    @property
+    def uptime(self) -> str:
+        secs = self.uptime_seconds
+        if secs < 60:
+            return f"{secs}s"
+        mins = secs // 60
+        if mins < 60:
+            return f"{mins}min"
+        hours = mins // 60
+        return f"{hours}h {mins % 60}min"
+
     def start(self) -> None:
         self._start_stream()
 
+    def _notify_info(self) -> None:
+        if self._on_info is not None:
+            self._on_info()
+
+    def _extract_caps_info(self, caps: Gst.Caps) -> None:
+        if caps.get_size() == 0:
+            return
+        structure = caps.get_structure(0)
+        w = structure.get_int("width")
+        h = structure.get_int("height")
+        if w[0] and h[0]:
+            self._resolution = f"{w[1]}x{h[1]}"
+        fps_num = structure.get_fraction("framerate")
+        if fps_num[0]:
+            num, denom = fps_num[1].numerator, fps_num[1].denominator
+            if denom > 0:
+                self._fps_str = f"{num / denom:.0f}"
+        encoder = structure.get_string("encoding-name")
+        if encoder[0]:
+            self._codec = encoder[1]
+
+    def _on_decodebin_pad_added(
+        self, _decodebin: Gst.Element, pad: Gst.Pad
+    ) -> None:
+        caps = pad.get_current_caps()
+        if caps is None:
+            caps = pad.get_allowed_caps()
+        if caps is not None:
+            name = caps.to_string().split(",")[0] if caps.to_string() else ""
+            if "video" in name:
+                self._extract_caps_info(caps)
+                self._notify_info()
+        pad.add_probe(
+            Gst.PadProbeType.EVENT_DOWNSTREAM, self._on_video_pad_probe, None
+        )
+
+    def _on_video_pad_probe(
+        self,
+        _pad: Gst.Pad,
+        info: Gst.PadProbeInfo,
+        _user_data: object,
+    ) -> Gst.PadProbeReturn:
+        evt = info.get_event()
+        if evt is not None and evt.type == Gst.EventType.CAPS:
+            caps = evt.parse_caps()
+            self._extract_caps_info(caps)
+            self._notify_info()
+        return Gst.PadProbeReturn.OK
+
     def _notify_status(self, status: CameraStatus) -> None:
         self.state.status = status
+        if status == CameraStatus.LIVE and self._start_time is None:
+            import time
+            self._start_time = time.time()
         if self._on_status is not None:
             self._on_status(status)
 
@@ -89,6 +178,10 @@ class CameraPlayer:
             self._notify_status(CameraStatus.ERROR)
             logger.error("[%s] %s", self.camera.name, exc)
             return
+
+        decodebin = pipeline.get_by_name("decode")
+        if decodebin is not None:
+            decodebin.connect("pad-added", self._on_decodebin_pad_added)
 
         sink = pipeline.get_by_name("sink")
         paintable = sink.get_property("paintable")
@@ -158,6 +251,7 @@ class CameraPlayer:
             bus.remove_signal_watch()
             self.state.pipeline.set_state(Gst.State.NULL)
             self.state.pipeline = None
+        self._start_time = None
 
     def stop(self) -> None:
         if self._reconnect_source is not None:
@@ -303,11 +397,16 @@ class CameraListRow(Gtk.Box):
 
         self.add_css_class("camera-list-row")
 
-        self._player = CameraPlayer(camera, on_status=self._update_status_ui)
+        self._player = CameraPlayer(
+            camera, on_status=self._update_status_ui, on_info=self._update_info
+        )
+        self._uptime_source: int | None = None
         self._build_ui()
         self._player.start()
 
     def _build_ui(self) -> None:
+
+        # --- Left: preview ---
         left_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         left_box.set_size_request(400, -1)
         left_box.set_hexpand(False)
@@ -324,32 +423,32 @@ class CameraListRow(Gtk.Box):
         top_bar.set_halign(Gtk.Align.FILL)
         left_box.append(top_bar)
 
-        self._name_label = Gtk.Label(label=self.camera.name)
-        self._name_label.add_css_class("camera-name")
-        self._name_label.set_halign(Gtk.Align.START)
-        self._name_label.set_valign(Gtk.Align.CENTER)
-        top_bar.append(self._name_label)
+        self._name_label_preview = Gtk.Label(label=self.camera.name)
+        self._name_label_preview.add_css_class("camera-name")
+        self._name_label_preview.set_halign(Gtk.Align.START)
+        self._name_label_preview.set_valign(Gtk.Align.CENTER)
+        top_bar.append(self._name_label_preview)
 
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         top_bar.append(spacer)
 
-        self._status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._status_box.add_css_class("camera-status-tag")
-        self._status_box.set_halign(Gtk.Align.END)
-        self._status_box.set_valign(Gtk.Align.CENTER)
+        self._status_box_preview = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._status_box_preview.add_css_class("camera-status-tag")
+        self._status_box_preview.set_halign(Gtk.Align.END)
+        self._status_box_preview.set_valign(Gtk.Align.CENTER)
 
-        self._status_dot = Gtk.Label(label="●")
-        self._status_dot.add_css_class("status-dot")
-        self._status_dot.set_valign(Gtk.Align.CENTER)
-        self._status_box.append(self._status_dot)
+        self._status_dot_preview = Gtk.Label(label="●")
+        self._status_dot_preview.add_css_class("status-dot")
+        self._status_dot_preview.set_valign(Gtk.Align.CENTER)
+        self._status_box_preview.append(self._status_dot_preview)
 
-        self._status_label = Gtk.Label(label="CON")
-        self._status_label.add_css_class("camera-status-text")
-        self._status_label.set_valign(Gtk.Align.CENTER)
-        self._status_box.append(self._status_label)
+        self._status_label_preview = Gtk.Label(label="CON")
+        self._status_label_preview.add_css_class("camera-status-text")
+        self._status_label_preview.set_valign(Gtk.Align.CENTER)
+        self._status_box_preview.append(self._status_label_preview)
 
-        top_bar.append(self._status_box)
+        top_bar.append(self._status_box_preview)
 
         overlay = Gtk.Overlay()
         overlay.add_css_class("camera-list-feed")
@@ -376,11 +475,88 @@ class CameraListRow(Gtk.Box):
         self._no_signal.append(ns_label)
         overlay.add_overlay(self._no_signal)
 
-        right_spacer = Gtk.Box()
-        right_spacer.set_hexpand(True)
-        right_spacer.set_vexpand(True)
-        right_spacer.add_css_class("camera-list-spacer")
-        self.append(right_spacer)
+        # --- Right: detail panel ---
+        detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        detail.set_hexpand(True)
+        detail.set_vexpand(True)
+        detail.add_css_class("camera-list-detail")
+        detail.set_margin_start(8)
+        detail.set_margin_end(8)
+        detail.set_margin_top(10)
+        detail.set_margin_bottom(10)
+        self.append(detail)
+
+        self._detail_name = Gtk.Label(label=self.camera.name)
+        self._detail_name.add_css_class("camera-list-detail-title")
+        self._detail_name.set_halign(Gtk.Align.START)
+        detail.append(self._detail_name)
+
+        self._detail_url = Gtk.Label(label=self.camera.rtsp_url)
+        self._detail_url.add_css_class("camera-list-detail-subtitle")
+        self._detail_url.set_halign(Gtk.Align.START)
+        self._detail_url.set_ellipsize(2)
+        self._detail_url.set_margin_bottom(6)
+        detail.append(self._detail_url)
+
+        self._detail_status_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=4
+        )
+        self._detail_status_row.set_valign(Gtk.Align.CENTER)
+        self._detail_status_row.set_margin_bottom(4)
+        self._detail_status_dot = Gtk.Label(label="●")
+        self._detail_status_dot.add_css_class("status-dot")
+        self._detail_status_dot.add_css_class("status-connecting")
+        self._detail_status_dot.set_valign(Gtk.Align.CENTER)
+        self._detail_status_row.append(self._detail_status_dot)
+        self._detail_status_label = Gtk.Label(label="CON")
+        self._detail_status_label.add_css_class("camera-list-detail-subtitle")
+        self._detail_status_label.set_valign(Gtk.Align.CENTER)
+        self._detail_status_row.append(self._detail_status_label)
+        detail.append(self._detail_status_row)
+
+        spacer1 = Gtk.Box()
+        spacer1.set_vexpand(True)
+        spacer1.set_size_request(-1, 8)
+        detail.append(spacer1)
+
+        info_grid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        info_grid.add_css_class("camera-list-info-grid")
+        detail.append(info_grid)
+
+        items = [
+            ("Resolution", "resolution", "-- x --"),
+            ("FPS", "fps", "--"),
+            ("Codec", "codec", "--"),
+            ("Uptime", "uptime", "--"),
+        ]
+        self._info_labels: dict[str, Gtk.Label] = {}
+        for label, key, default in items:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            l = Gtk.Label(label=f"{label}:")
+            l.add_css_class("camera-list-info-label")
+            l.set_halign(Gtk.Align.START)
+            row.append(l)
+            v = Gtk.Label(label=default)
+            v.add_css_class("camera-list-info-value")
+            v.set_halign(Gtk.Align.START)
+            v.set_hexpand(True)
+            row.append(v)
+            self._info_labels[key] = v
+            info_grid.append(row)
+
+        spacer2 = Gtk.Box()
+        spacer2.set_vexpand(True)
+        spacer2.set_size_request(-1, 8)
+        detail.append(spacer2)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        actions.set_valign(Gtk.Align.END)
+        detail.append(actions)
+
+        for label in ("Fullscreen", "Reconnect"):
+            btn = Gtk.Button(label=label)
+            btn.add_css_class("camera-list-action-btn")
+            actions.append(btn)
 
     def _update_status_ui(self, status: CameraStatus) -> None:
         color_map = {
@@ -398,17 +574,38 @@ class CameraListRow(Gtk.Box):
             CameraStatus.ERROR: "ERR",
         }
         css_class = color_map.get(status, "status-connecting")
+        text = text_map.get(status, "---")
 
-        for cls in color_map.values():
-            self._status_dot.remove_css_class(cls)
+        for dot in (self._status_dot_preview, self._detail_status_dot):
+            for cls in color_map.values():
+                dot.remove_css_class(cls)
+            dot.add_css_class(css_class)
 
-        self._status_dot.add_css_class(css_class)
-        self._status_label.set_label(text_map.get(status, "---"))
+        self._status_label_preview.set_label(text)
+        self._detail_status_label.set_label(text)
         self._no_signal.set_visible(
-            status in (CameraStatus.CONNECTING, CameraStatus.NO_SIGNAL, CameraStatus.ERROR)
+            status
+            in (CameraStatus.CONNECTING, CameraStatus.NO_SIGNAL, CameraStatus.ERROR)
         )
 
+        if status == CameraStatus.LIVE:
+            if self._uptime_source is None:
+                self._uptime_source = GLib.timeout_add_seconds(
+                    30, self._update_info
+                )
+
+    def _update_info(self) -> bool:
+        p = self._player
+        self._info_labels["resolution"].set_label(p.resolution)
+        self._info_labels["fps"].set_label(p.fps)
+        self._info_labels["codec"].set_label(p.codec)
+        self._info_labels["uptime"].set_label(p.uptime)
+        return True
+
     def stop(self) -> None:
+        if self._uptime_source is not None:
+            GLib.source_remove(self._uptime_source)
+            self._uptime_source = None
         self._player.stop()
 
 
