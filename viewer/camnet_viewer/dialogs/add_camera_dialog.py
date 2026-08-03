@@ -288,6 +288,7 @@ class AddCameraDialog(Gtk.Window):
         self._stack.set_visible_child_name("onvif" if combo.get_selected() == 1 else "rtsp")
 
     def _on_add_clicked(self, _widget: Gtk.Widget) -> None:
+        logger.info("Add Camera clicked")
         self._stop_preview()
         self._stop_onvif_preview()
 
@@ -296,18 +297,24 @@ class AddCameraDialog(Gtk.Window):
         if is_onvif:
             name = self._onvif_name.get_text().strip()
             if not name:
+                logger.info("Add Camera: no name, abort")
                 return
             rtsp_url = self._selected_onvif_url()
+            logger.info("Add Camera: ONVIF name=%s url=%s", name, rtsp_url)
             if not rtsp_url:
+                logger.info("Add Camera: no ONVIF URL, abort")
                 return
         else:
             name = self._rtsp_name.get_text().strip()
             url = self._rtsp_url.get_text().strip()
             if not name or not url:
+                logger.info("Add Camera: RTSP missing name or url")
                 return
             rtsp_url = url
 
+        logger.info("Add Camera: calling on_add")
         self._on_add(CameraConfig(name=name, rtsp_url=rtsp_url))
+        logger.info("Add Camera: closing dialog")
         self.close()
 
     def _on_cancel(self, _widget: Gtk.Widget) -> None:
@@ -554,7 +561,10 @@ class AddCameraDialog(Gtk.Window):
         if self._onvif_preview_pipeline is not None:
             logger.info("ONVIF preview: stop")
             self._onvif_preview_picture.set_paintable(None)
+            logger.info("ONVIF preview: set NULL")
             self._onvif_preview_pipeline.set_state(Gst.State.NULL)
+            logger.info("ONVIF preview: wait NULL")
             self._onvif_preview_pipeline.get_state(Gst.CLOCK_TIME_NONE)
+            logger.info("ONVIF preview: NULL reached")
             self._onvif_preview_pipeline = None
         self._current_preview_idx = -1
