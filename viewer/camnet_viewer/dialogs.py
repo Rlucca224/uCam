@@ -426,6 +426,8 @@ class AddCameraDialog(Gtk.Window):
 
         self._onvif_preview_msg.set_label(f"{len(profiles)} stream(s) found")
 
+        self._ignore_profile_changes = True
+
         self._profiles_model.splice(0, self._profiles_model.get_n_items(), [])
         for p in profiles:
             label = f"{p.resolution} — {p.name}"
@@ -436,9 +438,11 @@ class AddCameraDialog(Gtk.Window):
         self._onvif_preview_area.set_visible(True)
         self._onvif_preview_btn.set_label("Stop Preview")
 
-        self._set_profile_without_signal(0)
+        self._profiles_dropdown.set_selected(0)
         self._update_onvif_info(0)
         self._onvif_start_id = GLib.idle_add(self._start_onvif_preview_with_profile, 0)
+
+        self._ignore_profile_changes = False
 
     def _set_profile_without_signal(self, idx: int) -> None:
         self._ignore_profile_changes = True
