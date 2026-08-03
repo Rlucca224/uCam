@@ -256,6 +256,7 @@ class AddCameraDialog(Gtk.Window):
         self._onvif_preview_pipeline: Gst.Pipeline | None = None
         self._onvif_start_id: int | None = None
         self._ignore_profile_changes: bool = False
+        self._current_preview_idx: int = -1
 
         # Buttons
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -481,6 +482,10 @@ class AddCameraDialog(Gtk.Window):
         self._onvif_start_id = None
         if not self._onvif_profiles or idx >= len(self._onvif_profiles):
             return False
+        if self._onvif_preview_pipeline is not None and self._current_preview_idx == idx:
+            logger.info("ONVIF preview: already playing idx %d, skip", idx)
+            return False
+        self._current_preview_idx = idx
         url = self._onvif_profiles[idx].url
         logger.info("ONVIF preview: start %s", url)
         self._onvif_preview_status.set_label("Connecting…")
@@ -491,6 +496,7 @@ class AddCameraDialog(Gtk.Window):
         except RuntimeError as exc:
             self._onvif_preview_status.set_label(f"Error: {exc}")
             self._onvif_preview_pipeline = None
+            self._current_preview_idx = -1
             return False
 
         sink = self._onvif_preview_pipeline.get_by_name("sink")
@@ -539,6 +545,7 @@ class AddCameraDialog(Gtk.Window):
         self._onvif_preview_msg.set_label("")
         self._onvif_preview_btn.set_label("Preview")
         self._onvif_profiles = []
+        self._current_preview_idx = -1
         self._profiles_model.splice(0, self._profiles_model.get_n_items(), [])
 
     def _stop_onvif_preview_pipeline(self) -> None:
@@ -548,3 +555,4 @@ class AddCameraDialog(Gtk.Window):
             self._onvif_preview_pipeline.set_state(Gst.State.NULL)
             self._onvif_preview_pipeline.get_state(Gst.CLOCK_TIME_NONE)
             self._onvif_preview_pipeline = None
+        self._current_preview_idx = -1

@@ -18,8 +18,10 @@ def build_pipeline(camera_name: str, rtsp_url: str) -> Gst.Pipeline:
     if src is None:
         raise RuntimeError("rtspsrc no disponible — instalá gst-plugins-good")
     src.set_property("location", rtsp_url)
-    src.set_property("latency", 0)
+    src.set_property("latency", 200)
     src.set_property("timeout", 10_000_000)
+    # Forzar TCP mejora compatibilidad con cámaras sin auth y firewalls
+    src.set_property("protocols", Gst.RTSPLowerTrans.TCP)
 
     decode = Gst.ElementFactory.make("decodebin", "decode")
     convert = Gst.ElementFactory.make("videoconvert", "convert")
