@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gst", "1.0")
 
-from gi.repository import Gtk, Gst  # noqa: E402
+from gi.repository import Gtk, Gst, GLib  # noqa: E402
 
 from .models import CameraConfig
+from .onvif_discovery import StreamProfile, discover_onvif_streams
 from .pipeline import build_pipeline
 
 logger = logging.getLogger("camnet.viewer")
@@ -171,7 +173,7 @@ class AddCameraDialog(Gtk.Window):
         onvif_creds.append(onvif_pass_box)
         onvif_page.append(onvif_creds)
 
-        # Preview button (ONVIF — not functional yet, UI only)
+        # Preview button (ONVIF)
         onvif_preview_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         onvif_preview_row.set_halign(Gtk.Align.CENTER)
         onvif_preview_row.set_hexpand(False)
@@ -184,15 +186,74 @@ class AddCameraDialog(Gtk.Window):
         onvif_page.append(onvif_preview_row)
 
         onvif_preview_msg = Gtk.Label(label="")
-        onvif_preview_msg.set_halign(Gtk.Align.START)
+        onvif_preview_msg.set_halign(Gtk.Align.CENTER)
         onvif_preview_msg.add_css_class("preview-status")
         self._onvif_preview_msg = onvif_preview_msg
         onvif_page.append(onvif_preview_msg)
+
+        # Profiles dropdown (initially hidden)
+        profiles_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        profiles_box.set_visible(False)
+        self._profiles_box = profiles_box
+        onvif_page.append(profiles_box)
+
+        profiles_label = Gtk.Label(label="Available Streams")
+        profiles_label.set_halign(Gtk.Align.START)
+        profiles_label.add_css_class("dialog-label")
+        profiles_box.append(profiles_label)
+
+        self._profiles_model = Gtk.StringList()
+        self._profiles_dropdown = Gtk.DropDown()
+        self._profiles_dropdown.set_model(self._profiles_model)
+        self._profiles_dropdown.add_css_class("dialog-dropdown")
+        self._profiles_dropdown.connect("notify::selected", self._on_profile_changed)
+        profiles_box.append(self._profiles_dropdown)
+
+        # Info grid
+        info_grid = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        info_grid.set_visible(False)
+        self._onvif_info_grid = info_grid
+        profiles_box.append(info_grid)
+
+        self._onvif_res_label = Gtk.Label(label="Resolution: --")
+        self._onvif_res_label.add_css_class("dialog-label")
+        info_grid.append(self._onvif_res_label)
+
+        self._onvif_codec_label = Gtk.Label(label="Codec: --")
+        self._onvif_codec_label.add_css_class("dialog-label")
+        info_grid.append(self._onvif_codec_label)
+
+        self._onvif_fps_label = Gtk.Label(label="FPS: --")
+        self._onvif_fps_label.add_css_class("dialog-label")
+        info_grid.append(self._onvif_fps_label)
+
+        # Preview area (ONVIF, hidden by default)
+        self._onvif_preview_area = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._onvif_preview_area.add_css_class("preview-container")
+        self._onvif_preview_area.set_visible(False)
+        onvif_page.append(self._onvif_preview_area)
+
+        self._onvif_preview_picture = Gtk.Picture()
+        self._onvif_preview_picture.set_size_request(320, 180)
+        self._onvif_preview_picture.add_css_class("preview-video")
+        self._onvif_preview_picture.set_hexpand(True)
+        self._onvif_preview_area.append(self._onvif_preview_picture)
+
+        self._onvif_preview_status = Gtk.Label(label="")
+        self._onvif_preview_status.set_halign(Gtk.Align.CENTER)
+        self._onvif_preview_status.add_css_class("preview-status")
+        self._onvif_preview_area.append(self._onvif_preview_status)
 
         self._onvif_endpoint.connect(
             "notify::text",
             lambda e, _p: self._onvif_preview_btn.set_visible(bool(e.get_text().strip())),
         )
+        self._onvif_endpoint.connect("activate", self._on_onvif_preview)
+        self._onvif_user.connect("activate", self._on_onvif_preview)
+        self._onvif_pass.connect("activate", self._on_onvif_preview)
+
+        self._onvif_profiles: list[StreamProfile] = []
+        self._onvif_preview_pipeline: Gst.Pipeline | None = None
 
         # Buttons
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -218,21 +279,22 @@ class AddCameraDialog(Gtk.Window):
 
     def _on_proto_changed(self, combo, _pspec) -> None:
         self._stop_preview()
+        self._stop_onvif_preview()
         self._stack.set_visible_child_name("onvif" if combo.get_selected() == 1 else "rtsp")
 
     def _on_add_clicked(self, _widget: Gtk.Widget) -> None:
         self._stop_preview()
+        self._stop_onvif_preview()
 
         is_onvif = self._proto_combo.get_selected() == 1
 
         if is_onvif:
             name = self._onvif_name.get_text().strip()
-            endpoint = self._onvif_endpoint.get_text().strip()
-            if not name or not endpoint:
+            if not name:
                 return
-            user = self._onvif_user.get_text().strip()
-            password = self._onvif_pass.get_text().strip()
-            rtsp_url = f"onvif://{user}:{password}@{endpoint}" if endpoint.startswith("http") else endpoint
+            rtsp_url = self._selected_onvif_url()
+            if not rtsp_url:
+                return
         else:
             name = self._rtsp_name.get_text().strip()
             url = self._rtsp_url.get_text().strip()
@@ -245,6 +307,7 @@ class AddCameraDialog(Gtk.Window):
 
     def _on_cancel(self, _widget: Gtk.Widget) -> None:
         self._stop_preview()
+        self._stop_onvif_preview()
         self.close()
 
     # -- Preview -------------------------------------------------------
@@ -320,4 +383,136 @@ class AddCameraDialog(Gtk.Window):
         self._preview_status.set_label("")
 
     def _on_onvif_preview(self) -> None:
-        self._onvif_preview_msg.set_label("ONVIF preview coming in Hito 4")
+        if self._onvif_preview_pipeline is not None:
+            self._stop_onvif_preview()
+            return
+
+        endpoint = self._onvif_endpoint.get_text().strip()
+        user = self._onvif_user.get_text().strip()
+        password = self._onvif_pass.get_text().strip()
+        if not endpoint:
+            return
+
+        self._onvif_preview_msg.set_label("Discovering ONVIF profiles…")
+        self._onvif_preview_btn.set_sensitive(False)
+
+        def discover() -> None:
+            try:
+                profiles = discover_onvif_streams(endpoint, user, password)
+                GLib.idle_add(self._on_onvif_profiles_ready, profiles, None)
+            except Exception as exc:
+                logger.exception("ONVIF discovery failed")
+                GLib.idle_add(self._on_onvif_profiles_ready, [], str(exc))
+
+        threading.Thread(target=discover, daemon=True).start()
+
+    def _on_onvif_profiles_ready(
+        self, profiles: list[StreamProfile], error: str | None
+    ) -> None:
+        self._onvif_preview_btn.set_sensitive(True)
+        self._onvif_profiles = profiles
+
+        if error:
+            self._onvif_preview_msg.set_label(f"Discovery error: {error}")
+            return
+
+        if not profiles:
+            self._onvif_preview_msg.set_label("No streams found")
+            return
+
+        self._onvif_preview_msg.set_label(f"{len(profiles)} stream(s) found")
+
+        self._profiles_model.splice(0, self._profiles_model.get_n_items(), [])
+        for p in profiles:
+            label = f"{p.resolution} — {p.name}"
+            self._profiles_model.append(label)
+
+        self._profiles_box.set_visible(True)
+        self._onvif_info_grid.set_visible(True)
+        self._onvif_preview_area.set_visible(True)
+        self._onvif_preview_btn.set_label("Stop Preview")
+
+        self._profiles_dropdown.set_selected(0)
+        self._update_onvif_info(0)
+        self._start_onvif_preview_with_profile(0)
+
+    def _selected_onvif_url(self) -> str:
+        idx = self._profiles_dropdown.get_selected()
+        if 0 <= idx < len(self._onvif_profiles):
+            return self._onvif_profiles[idx].url
+        return ""
+
+    def _on_profile_changed(self, dropdown, _pspec) -> None:
+        idx = dropdown.get_selected()
+        if idx < 0 or idx >= len(self._onvif_profiles):
+            return
+        self._stop_onvif_preview_pipeline()
+        self._update_onvif_info(idx)
+        self._start_onvif_preview_with_profile(idx)
+
+    def _update_onvif_info(self, idx: int) -> None:
+        p = self._onvif_profiles[idx]
+        self._onvif_res_label.set_label(f"Resolution: {p.resolution}")
+        self._onvif_codec_label.set_label(f"Codec: {p.encoding or '--'}")
+        self._onvif_fps_label.set_label(f"FPS: {p.fps or '--'}")
+
+    def _start_onvif_preview_with_profile(self, idx: int) -> None:
+        url = self._onvif_profiles[idx].url
+        self._onvif_preview_status.set_label("Connecting…")
+        self._onvif_preview_area.set_visible(True)
+
+        try:
+            self._onvif_preview_pipeline = build_pipeline("_onvif_preview", url)
+        except RuntimeError as exc:
+            self._onvif_preview_status.set_label(f"Error: {exc}")
+            self._onvif_preview_pipeline = None
+            return
+
+        sink = self._onvif_preview_pipeline.get_by_name("sink")
+        paintable = sink.get_property("paintable")
+        if paintable is not None:
+            self._onvif_preview_picture.set_paintable(paintable)
+            self._onvif_preview_status.set_label("Connected")
+        else:
+            sink.connect("notify::paintable", self._on_onvif_preview_paintable)
+
+        bus = self._onvif_preview_pipeline.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message::error", self._on_onvif_preview_error)
+        bus.connect("message::state-changed", self._on_onvif_preview_state)
+
+        self._onvif_preview_pipeline.set_state(Gst.State.PLAYING)
+
+    def _on_onvif_preview_paintable(self, sink, _pspec) -> None:
+        paintable = sink.get_property("paintable")
+        if paintable is not None:
+            self._onvif_preview_picture.set_paintable(paintable)
+            self._onvif_preview_status.set_label("Connected")
+
+    def _on_onvif_preview_error(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
+        err, _debug = msg.parse_error()
+        self._onvif_preview_status.set_label(f"Error: {err.message}")
+
+    def _on_onvif_preview_state(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
+        if msg.src != self._onvif_preview_pipeline:
+            return
+        _old, new, _pending = msg.parse_state_changed()
+        if new == Gst.State.PLAYING:
+            self._onvif_preview_status.set_label("Connected")
+        elif new == Gst.State.NULL:
+            self._onvif_preview_status.set_label("Disconnected")
+
+    def _stop_onvif_preview(self) -> None:
+        self._stop_onvif_preview_pipeline()
+        self._profiles_box.set_visible(False)
+        self._onvif_info_grid.set_visible(False)
+        self._onvif_preview_area.set_visible(False)
+        self._onvif_preview_msg.set_label("")
+        self._onvif_preview_btn.set_label("Preview")
+        self._onvif_profiles = []
+        self._profiles_model.splice(0, self._profiles_model.get_n_items(), [])
+
+    def _stop_onvif_preview_pipeline(self) -> None:
+        if self._onvif_preview_pipeline is not None:
+            self._onvif_preview_pipeline.set_state(Gst.State.NULL)
+            self._onvif_preview_pipeline = None

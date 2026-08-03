@@ -1,0 +1,7 @@
+# Visor nativo CamNet / uCam
+
+# UI nativa GTK4
+PyGObject>=3.42.0
+
+# Descubrimiento ONVIF
+onvif-zeep>=0.2.12
