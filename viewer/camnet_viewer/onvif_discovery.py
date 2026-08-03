@@ -164,6 +164,7 @@ def discover_onvif_streams(
             )
             raw_url = str(uri.Uri)
             profile.url = normalize_rtsp_url(raw_url, user, password)
+            logger.info("ONVIF: perfil %s -> %s (raw: %s)", profile.name, profile.url, raw_url)
         except Exception as exc:
             logger.warning(
                 "ONVIF: no se pudo obtener URI para %s: %s", profile.token, exc
