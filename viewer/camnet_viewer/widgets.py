@@ -259,9 +259,11 @@ class CameraPlayer:
 
     def _stop_pipeline(self) -> None:
         if self.state.pipeline is not None:
+            self._picture.set_paintable(None)
+            self.state.pipeline.set_state(Gst.State.NULL)
+            self.state.pipeline.get_state(Gst.CLOCK_TIME_NONE)
             bus = self.state.pipeline.get_bus()
             bus.remove_signal_watch()
-            self.state.pipeline.set_state(Gst.State.NULL)
             self.state.pipeline = None
         self._start_time = None
 
@@ -270,6 +272,9 @@ class CameraPlayer:
             GLib.source_remove(self._reconnect_source)
             self._reconnect_source = None
         self._stop_pipeline()
+
+    def clear_picture(self) -> None:
+        self._picture.set_paintable(None)
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +406,7 @@ class CameraCard(Gtk.Box):
         )
 
     def stop(self) -> None:
+        self._picture.set_paintable(None)
         if self._own_player:
             self._player.stop()
 
@@ -623,6 +629,7 @@ class CameraListRow(Gtk.Box):
         return True
 
     def stop(self) -> None:
+        self._picture.set_paintable(None)
         if self._uptime_source is not None:
             GLib.source_remove(self._uptime_source)
             self._uptime_source = None
@@ -931,5 +938,9 @@ class CameraGrid(Gtk.Box):
         player.start()
 
     def shutdown(self) -> None:
+        for card in self._cards:
+            card.stop()
+        for row in self._rows:
+            row.stop()
         for player in self._players.values():
             player.stop()
