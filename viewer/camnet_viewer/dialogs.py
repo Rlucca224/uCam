@@ -435,9 +435,14 @@ class AddCameraDialog(Gtk.Window):
         self._onvif_preview_area.set_visible(True)
         self._onvif_preview_btn.set_label("Stop Preview")
 
-        self._profiles_dropdown.set_selected(0)
+        self._set_profile_without_signal(0)
         self._update_onvif_info(0)
         self._onvif_start_id = GLib.idle_add(self._start_onvif_preview_with_profile, 0)
+
+    def _set_profile_without_signal(self, idx: int) -> None:
+        self._profiles_dropdown.handler_block_by_func(self._on_profile_changed)
+        self._profiles_dropdown.set_selected(idx)
+        self._profiles_dropdown.handler_unblock_by_func(self._on_profile_changed)
 
     def _selected_onvif_url(self) -> str:
         idx = self._profiles_dropdown.get_selected()
