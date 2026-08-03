@@ -495,24 +495,8 @@ class CameraListRow(Gtk.Box):
         self._detail_url.add_css_class("camera-list-detail-subtitle")
         self._detail_url.set_halign(Gtk.Align.START)
         self._detail_url.set_ellipsize(2)
-        self._detail_url.set_margin_bottom(6)
+        self._detail_url.set_margin_bottom(12)
         detail.append(self._detail_url)
-
-        self._detail_status_row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=4
-        )
-        self._detail_status_row.set_valign(Gtk.Align.CENTER)
-        self._detail_status_row.set_margin_bottom(4)
-        self._detail_status_dot = Gtk.Label(label="●")
-        self._detail_status_dot.add_css_class("status-dot")
-        self._detail_status_dot.add_css_class("status-connecting")
-        self._detail_status_dot.set_valign(Gtk.Align.CENTER)
-        self._detail_status_row.append(self._detail_status_dot)
-        self._detail_status_label = Gtk.Label(label="CON")
-        self._detail_status_label.add_css_class("camera-list-detail-subtitle")
-        self._detail_status_label.set_valign(Gtk.Align.CENTER)
-        self._detail_status_row.append(self._detail_status_label)
-        detail.append(self._detail_status_row)
 
         spacer1 = Gtk.Box()
         spacer1.set_vexpand(True)
@@ -576,13 +560,11 @@ class CameraListRow(Gtk.Box):
         css_class = color_map.get(status, "status-connecting")
         text = text_map.get(status, "---")
 
-        for dot in (self._status_dot_preview, self._detail_status_dot):
-            for cls in color_map.values():
-                dot.remove_css_class(cls)
-            dot.add_css_class(css_class)
-
+        for cls in color_map.values():
+            self._status_dot_preview.remove_css_class(cls)
+        self._status_dot_preview.add_css_class(css_class)
         self._status_label_preview.set_label(text)
-        self._detail_status_label.set_label(text)
+
         self._no_signal.set_visible(
             status
             in (CameraStatus.CONNECTING, CameraStatus.NO_SIGNAL, CameraStatus.ERROR)
