@@ -50,16 +50,12 @@ def icon_button(icon_name: str, label: str, css_class: str) -> Gtk.Button:
 class CameraPlayer:
     """Maneja el pipeline GStreamer de una cámara y expone su Gtk.Picture."""
 
-    def __init__(
-        self,
-        camera: CameraConfig,
-        on_status: object | None = None,
-        on_info: object | None = None,
-    ) -> None:
+    def __init__(self, camera: CameraConfig) -> None:
         self.camera = camera
         self.state = CameraState(config=camera)
-        self._on_status = on_status
-        self._on_info = on_info
+        self._status_listeners: list = []
+        self._paintable_listeners: list = []
+        self._on_info: object | None = None
 
         self._reconnect_delay = 1
         self._reconnect_max_delay = 30
@@ -110,6 +106,15 @@ class CameraPlayer:
             return f"{mins}min"
         hours = mins // 60
         return f"{hours}h {mins % 60}min"
+
+    def add_status_listener(self, cb: object) -> None:
+        self._status_listeners.append(cb)
+
+    def add_paintable_listener(self, cb: object) -> None:
+        self._paintable_listeners.append(cb)
+
+    def add_info_listener(self, cb: object) -> None:
+        self._on_info = cb
 
     def start(self) -> None:
         self._start_stream()
@@ -171,8 +176,8 @@ class CameraPlayer:
         if status == CameraStatus.LIVE and self._start_time is None:
             import time
             self._start_time = time.time()
-        if self._on_status is not None:
-            self._on_status(status)
+        for cb in self._status_listeners:
+            cb(status)
 
     def _start_stream(self) -> None:
         try:
@@ -190,6 +195,8 @@ class CameraPlayer:
         paintable = sink.get_property("paintable")
         if paintable is not None:
             self._picture.set_paintable(paintable)
+            for cb in self._paintable_listeners:
+                cb(paintable)
 
         sink.connect("notify::paintable", self._on_paintable_notify)
 
@@ -208,6 +215,8 @@ class CameraPlayer:
         if paintable is not None:
             self._picture.set_paintable(paintable)
             self._notify_status(CameraStatus.LIVE)
+            for cb in self._paintable_listeners:
+                cb(paintable)
 
     def _on_bus_error(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         err, _debug = msg.parse_error()
@@ -282,31 +291,40 @@ class CameraCard(Gtk.Box):
         self.add_css_class("camera-card")
 
         self._own_player = player is None
-        self._player = player or CameraPlayer(camera, on_status=self._update_status_ui)
-        self._active = False
+        self._player = player or CameraPlayer(camera)
+        self._player.add_status_listener(self._update_status_ui)
+        self._player.add_paintable_listener(self._on_paintable)
         self._build_ui()
         if self._own_player:
             self._player.start()
 
     def _build_ui(self) -> None:
-        self._overlay = Gtk.Overlay()
-        self._overlay.add_css_class("camera-feed")
-        self._overlay.set_overflow(Gtk.Overflow.HIDDEN)
-        self._overlay.set_hexpand(True)
-        self._overlay.set_vexpand(True)
-        self.append(self._overlay)
+        overlay = Gtk.Overlay()
+        overlay.add_css_class("camera-feed")
+        overlay.set_overflow(Gtk.Overflow.HIDDEN)
+        overlay.set_hexpand(True)
+        overlay.set_vexpand(True)
+        self.append(overlay)
 
         main_child = Gtk.Box()
         main_child.set_hexpand(False)
         main_child.set_vexpand(False)
         main_child.set_size_request(320, 180)
-        self._overlay.set_child(main_child)
+        overlay.set_child(main_child)
+
+        self._picture = Gtk.Picture()
+        self._picture.set_can_shrink(True)
+        self._picture.set_content_fit(Gtk.ContentFit.COVER)
+        self._picture.add_css_class("camera-video")
+        self._picture.set_halign(Gtk.Align.FILL)
+        self._picture.set_valign(Gtk.Align.FILL)
+        overlay.add_overlay(self._picture)
 
         gradient_box = Gtk.Box()
         gradient_box.add_css_class("camera-gradient-top")
         gradient_box.set_valign(Gtk.Align.START)
         gradient_box.set_halign(Gtk.Align.FILL)
-        self._overlay.add_overlay(gradient_box)
+        overlay.add_overlay(gradient_box)
 
         top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         top_bar.set_margin_start(8)
@@ -314,7 +332,7 @@ class CameraCard(Gtk.Box):
         top_bar.set_margin_top(8)
         top_bar.set_valign(Gtk.Align.START)
         top_bar.set_halign(Gtk.Align.FILL)
-        self._overlay.add_overlay(top_bar)
+        overlay.add_overlay(top_bar)
 
         self._name_label = Gtk.Label(label=self.camera.name)
         self._name_label.add_css_class("camera-name")
@@ -351,20 +369,10 @@ class CameraCard(Gtk.Box):
         ns_label = Gtk.Label(label="Conectando…")
         ns_label.add_css_class("no-signal-text")
         self._no_signal.append(ns_label)
-        self._overlay.add_overlay(self._no_signal)
+        overlay.add_overlay(self._no_signal)
 
-    def activate(self) -> None:
-        if self._active:
-            return
-        self._active = True
-        self._player._on_status = self._update_status_ui
-        self._overlay.add_overlay(self._player.picture)
-
-    def deactivate(self) -> None:
-        if not self._active:
-            return
-        self._active = False
-        self._overlay.remove_overlay(self._player.picture)
+    def _on_paintable(self, paintable: object) -> None:
+        self._picture.set_paintable(paintable)
 
     def _update_status_ui(self, status: CameraStatus) -> None:
         color_map = {
@@ -416,10 +424,10 @@ class CameraListRow(Gtk.Box):
         self.add_css_class("camera-list-row")
 
         self._own_player = player is None
-        self._active = False
-        self._player = player or CameraPlayer(
-            camera, on_info=self._update_info
-        )
+        self._player = player or CameraPlayer(camera)
+        self._player.add_status_listener(self._update_status_ui)
+        self._player.add_paintable_listener(self._on_paintable)
+        self._player.add_info_listener(self._update_info)
         self._uptime_source: int | None = None
         self._build_ui()
         if self._own_player:
@@ -477,13 +485,20 @@ class CameraListRow(Gtk.Box):
         overlay.set_vexpand(True)
         overlay.set_overflow(Gtk.Overflow.HIDDEN)
         left_box.append(overlay)
-        self._overlay = overlay
 
         main_child = Gtk.Box()
         main_child.set_hexpand(True)
         main_child.set_vexpand(True)
         main_child.set_size_request(290, 130)
         overlay.set_child(main_child)
+
+        self._picture = Gtk.Picture()
+        self._picture.set_can_shrink(True)
+        self._picture.set_content_fit(Gtk.ContentFit.COVER)
+        self._picture.add_css_class("camera-video")
+        self._picture.set_halign(Gtk.Align.FILL)
+        self._picture.set_valign(Gtk.Align.FILL)
+        overlay.add_overlay(self._picture)
 
         self._no_signal = Gtk.Box()
         self._no_signal.add_css_class("no-signal-overlay")
@@ -562,21 +577,8 @@ class CameraListRow(Gtk.Box):
             btn.add_css_class("camera-list-action-btn")
             actions.append(btn)
 
-    def activate(self) -> None:
-        if self._active:
-            return
-        self._active = True
-        self._player._on_status = self._update_status_ui
-        self._player._on_info = self._update_info
-        self._overlay.add_overlay(self._player.picture)
-
-    def deactivate(self) -> None:
-        if not self._active:
-            return
-        self._active = False
-        self._player._on_status = None
-        self._player._on_info = None
-        self._overlay.remove_overlay(self._player.picture)
+    def _on_paintable(self, paintable: object) -> None:
+        self._picture.set_paintable(paintable)
 
     def _update_status_ui(self, status: CameraStatus) -> None:
         color_map = {
@@ -870,12 +872,14 @@ class CameraGrid(Gtk.Box):
 
         for cam in self._cameras:
             player = CameraPlayer(cam)
-            player.start()
             self._players[cam.rtsp_url] = player
 
         self._build_grid()
         self._build_list()
         self._show_layout("grid")
+
+        for player in self._players.values():
+            player.start()
 
     def _build_grid(self) -> None:
         for card in self._cards:
@@ -884,7 +888,6 @@ class CameraGrid(Gtk.Box):
         for cam in self._cameras:
             player = self._players[cam.rtsp_url]
             card = CameraCard(cam, player=player)
-            card.activate()
             self._cards.append(card)
             self._flow.append(card)
 
@@ -902,16 +905,8 @@ class CameraGrid(Gtk.Box):
         if layout == self._layout:
             return
         if layout == "grid":
-            for row in self._rows:
-                row.deactivate()
-            for card in self._cards:
-                card.activate()
             self._scrolled.set_child(self._flow)
         else:
-            for card in self._cards:
-                card.deactivate()
-            for row in self._rows:
-                row.activate()
             self._scrolled.set_child(self._list_box)
         self._layout = layout
 
@@ -923,21 +918,17 @@ class CameraGrid(Gtk.Box):
     def add_camera(self, camera: CameraConfig) -> None:
         self._cameras.append(camera)
         player = CameraPlayer(camera)
-        player.start()
         self._players[camera.rtsp_url] = player
 
         card = CameraCard(camera, player=player)
-        row = CameraListRow(camera, player=player)
-
-        if self._layout == "grid":
-            card.activate()
-        else:
-            row.activate()
-
         self._cards.append(card)
         self._flow.append(card)
+
+        row = CameraListRow(camera, player=player)
         self._rows.append(row)
         self._list_box.append(row)
+
+        player.start()
 
     def shutdown(self) -> None:
         for player in self._players.values():
