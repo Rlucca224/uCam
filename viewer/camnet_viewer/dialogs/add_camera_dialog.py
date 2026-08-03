@@ -1,4 +1,4 @@
-"""Diálogos de la aplicación."""
+"""Add camera dialog."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ gi.require_version("Gst", "1.0")
 
 from gi.repository import Gtk, Gst, GLib  # noqa: E402
 
-from .models import CameraConfig
-from .onvif_discovery import StreamProfile, discover_onvif_streams
-from .pipeline import build_pipeline
+from ..models import CameraConfig
+from ..onvif_discovery import StreamProfile, discover_onvif_streams
+from ..pipeline import build_pipeline
 
 logger = logging.getLogger("camnet.viewer")
 Gst.init(None)
