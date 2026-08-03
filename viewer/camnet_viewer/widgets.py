@@ -495,13 +495,13 @@ class CameraListRow(Gtk.Box):
         self._detail_url.add_css_class("camera-list-detail-subtitle")
         self._detail_url.set_halign(Gtk.Align.START)
         self._detail_url.set_ellipsize(2)
-        self._detail_url.set_margin_bottom(12)
+        self._detail_url.set_margin_bottom(4)
         detail.append(self._detail_url)
 
-        spacer1 = Gtk.Box()
-        spacer1.set_vexpand(True)
-        spacer1.set_size_request(-1, 8)
-        detail.append(spacer1)
+        spacer_top = Gtk.Box()
+        spacer_top.set_vexpand(True)
+        spacer_top.set_size_request(-1, 6)
+        detail.append(spacer_top)
 
         info_grid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         info_grid.add_css_class("camera-list-info-grid")
@@ -563,8 +563,8 @@ class CameraListRow(Gtk.Box):
         for cls in color_map.values():
             self._status_dot_preview.remove_css_class(cls)
         self._status_dot_preview.add_css_class(css_class)
-        self._status_label_preview.set_label(text)
 
+        self._status_label_preview.set_label(text)
         self._no_signal.set_visible(
             status
             in (CameraStatus.CONNECTING, CameraStatus.NO_SIGNAL, CameraStatus.ERROR)
@@ -816,8 +816,7 @@ class CameraGrid(Gtk.Box):
         self._flow.set_margin_bottom(12)
         self._flow.set_homogeneous(False)
         self._flow.set_valign(Gtk.Align.START)
-        self._flow.set_halign(Gtk.Align.FILL)
-        self._flow.set_hexpand(True)
+        self._flow.set_halign(Gtk.Align.START)
         self._flow.add_css_class("camera-flow")
 
         self._list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
