@@ -122,18 +122,21 @@ class CameraPlayer:
         if caps.get_size() == 0:
             return
         structure = caps.get_structure(0)
+
         w = structure.get_int("width")
         h = structure.get_int("height")
-        if w[0] and h[0]:
+        if w and h and w[0] and h[0]:
             self._resolution = f"{w[1]}x{h[1]}"
+
         fps_num = structure.get_fraction("framerate")
-        if fps_num[0]:
-            num, denom = fps_num[1].numerator, fps_num[1].denominator
-            if denom > 0:
-                self._fps_str = f"{num / denom:.0f}"
-        encoder = structure.get_string("encoding-name")
-        if encoder[0]:
-            self._codec = encoder[1]
+        if fps_num and fps_num[0]:
+            f = fps_num[1]
+            if f.denominator > 0:
+                self._fps_str = f"{f.numerator / f.denominator:.0f}"
+
+        name = structure.get_name()
+        if name and "/" in name:
+            self._codec = name.split("/")[-1].upper()
 
     def _on_decodebin_pad_added(
         self, _decodebin: Gst.Element, pad: Gst.Pad
