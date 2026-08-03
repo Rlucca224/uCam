@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger("camnet.viewer")
 
@@ -42,6 +43,48 @@ def _parse_endpoint(endpoint: str) -> tuple[str, int]:
     host = parsed.hostname or endpoint.split(":")[0].replace("http://", "").replace("https://", "")
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     return host, port
+
+
+def _extract_creds_from_path(path: str) -> tuple[str | None, str | None]:
+    """Extrae user/password del path estilo Dahua/Hikvision."""
+    user_match = re.search(r"(?:^|[/?&])user=([^&_]+)", path)
+    pass_match = re.search(r"_password=([^&_]+)", path)
+    if user_match and pass_match:
+        return user_match.group(1), pass_match.group(1)
+    return None, None
+
+
+def normalize_rtsp_url(url: str, fallback_user: str = "", fallback_pass: str = "") -> str:
+    """Convierte URLs RTSP de ONVIF a formato estandar para GStreamer."""
+    if not url.startswith("rtsp://"):
+        return url
+
+    parsed = urlparse(url)
+    if parsed.username or parsed.password:
+        # Ya tiene credenciales en formato estándar
+        return url
+
+    user, password = _extract_creds_from_path(parsed.path)
+    if user is None:
+        user = fallback_user
+    if password is None:
+        password = fallback_pass
+
+    netloc = parsed.hostname or ""
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    if user:
+        creds = f"{user}:{password}"
+        netloc = f"{creds}@{netloc}"
+
+    return urlunparse((
+        parsed.scheme,
+        netloc,
+        parsed.path,
+        parsed.params,
+        parsed.query,
+        parsed.fragment,
+    ))
 
 
 def _extract_profile(p) -> StreamProfile | None:
@@ -119,7 +162,8 @@ def discover_onvif_streams(
             uri = media.GetStreamUri(
                 {"ProfileToken": profile.token, "StreamSetup": stream_setup}
             )
-            profile.url = str(uri.Uri)
+            raw_url = str(uri.Uri)
+            profile.url = normalize_rtsp_url(raw_url, user, password)
         except Exception as exc:
             logger.warning(
                 "ONVIF: no se pudo obtener URI para %s: %s", profile.token, exc
