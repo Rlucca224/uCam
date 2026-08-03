@@ -43,6 +43,130 @@ def icon_button(icon_name: str, label: str, css_class: str) -> Gtk.Button:
 
 
 # ---------------------------------------------------------------------------
+# Reproductor de cámara (pipeline GStreamer compartido)
+# ---------------------------------------------------------------------------
+
+
+class CameraPlayer:
+    """Maneja el pipeline GStreamer de una cámara y expone su Gtk.Picture."""
+
+    def __init__(
+        self,
+        camera: CameraConfig,
+        on_status: object | None = None,
+    ) -> None:
+        self.camera = camera
+        self.state = CameraState(config=camera)
+        self._on_status = on_status
+
+        self._reconnect_delay = 1
+        self._reconnect_max_delay = 30
+        self._reconnect_source: int | None = None
+
+        self._picture = Gtk.Picture()
+        self._picture.set_can_shrink(True)
+        self._picture.set_content_fit(Gtk.ContentFit.COVER)
+        self._picture.add_css_class("camera-video")
+        self._picture.set_halign(Gtk.Align.FILL)
+        self._picture.set_valign(Gtk.Align.FILL)
+
+    @property
+    def picture(self) -> Gtk.Picture:
+        return self._picture
+
+    def start(self) -> None:
+        self._start_stream()
+
+    def _notify_status(self, status: CameraStatus) -> None:
+        self.state.status = status
+        if self._on_status is not None:
+            self._on_status(status)
+
+    def _start_stream(self) -> None:
+        try:
+            pipeline = build_pipeline(self.camera.name, self.camera.rtsp_url)
+        except RuntimeError as exc:
+            self._notify_status(CameraStatus.ERROR)
+            logger.error("[%s] %s", self.camera.name, exc)
+            return
+
+        sink = pipeline.get_by_name("sink")
+        paintable = sink.get_property("paintable")
+        if paintable is not None:
+            self._picture.set_paintable(paintable)
+
+        sink.connect("notify::paintable", self._on_paintable_notify)
+
+        bus = pipeline.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message::error", self._on_bus_error)
+        bus.connect("message::state-changed", self._on_bus_state_changed)
+        bus.connect("message::eos", self._on_bus_eos)
+
+        self.state.pipeline = pipeline
+        self._notify_status(CameraStatus.CONNECTING)
+        pipeline.set_state(Gst.State.PLAYING)
+
+    def _on_paintable_notify(self, sink, _pspec) -> None:
+        paintable = sink.get_property("paintable")
+        if paintable is not None:
+            self._picture.set_paintable(paintable)
+            self._notify_status(CameraStatus.LIVE)
+
+    def _on_bus_error(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
+        err, _debug = msg.parse_error()
+        logger.warning("[%s] %s", self.camera.name, err.message)
+        self._schedule_reconnect()
+
+    def _on_bus_eos(self, _bus: Gst.Bus, _msg: Gst.Message) -> None:
+        logger.info("[%s] End of stream", self.camera.name)
+        self._schedule_reconnect()
+
+    def _on_bus_state_changed(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
+        if msg.src != self.state.pipeline:
+            return
+        _old, new, _pending = msg.parse_state_changed()
+        if new == Gst.State.PLAYING:
+            self._notify_status(CameraStatus.LIVE)
+            self._reconnect_delay = 1
+        elif new == Gst.State.NULL:
+            self._notify_status(CameraStatus.NO_SIGNAL)
+
+    def _schedule_reconnect(self) -> None:
+        if self._reconnect_source is not None:
+            return
+        if self._reconnect_delay >= self._reconnect_max_delay:
+            self._notify_status(CameraStatus.ERROR)
+            self._reconnect_delay = self._reconnect_max_delay
+        else:
+            self._notify_status(CameraStatus.CONNECTING)
+        self._reconnect_source = GLib.timeout_add_seconds(
+            self._reconnect_delay, self._do_reconnect
+        )
+
+    def _do_reconnect(self) -> bool:
+        self._reconnect_source = None
+        self._stop_pipeline()
+        self._notify_status(CameraStatus.CONNECTING)
+        self._reconnect_delay = min(self._reconnect_delay * 2, self._reconnect_max_delay)
+        self._start_stream()
+        return False
+
+    def _stop_pipeline(self) -> None:
+        if self.state.pipeline is not None:
+            bus = self.state.pipeline.get_bus()
+            bus.remove_signal_watch()
+            self.state.pipeline.set_state(Gst.State.NULL)
+            self.state.pipeline = None
+
+    def stop(self) -> None:
+        if self._reconnect_source is not None:
+            GLib.source_remove(self._reconnect_source)
+            self._reconnect_source = None
+        self._stop_pipeline()
+
+
+# ---------------------------------------------------------------------------
 # Tarjeta de cámara
 # ---------------------------------------------------------------------------
 
@@ -53,7 +177,6 @@ class CameraCard(Gtk.Box):
     def __init__(self, camera: CameraConfig):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.camera = camera
-        self.state = CameraState(config=camera)
         self.set_hexpand(False)
         self.set_vexpand(False)
         self.set_size_request(320, 180)
@@ -61,12 +184,9 @@ class CameraCard(Gtk.Box):
 
         self.add_css_class("camera-card")
 
-        self._reconnect_delay = 1
-        self._reconnect_max_delay = 30
-        self._reconnect_source: int | None = None
-
+        self._player = CameraPlayer(camera, on_status=self._update_status_ui)
         self._build_ui()
-        self._start_stream()
+        self._player.start()
 
     def _build_ui(self) -> None:
         overlay = Gtk.Overlay()
@@ -82,13 +202,7 @@ class CameraCard(Gtk.Box):
         main_child.set_size_request(320, 180)
         overlay.set_child(main_child)
 
-        self._picture = Gtk.Picture()
-        self._picture.set_can_shrink(True)
-        self._picture.set_content_fit(Gtk.ContentFit.COVER)
-        self._picture.add_css_class("camera-video")
-        self._picture.set_halign(Gtk.Align.FILL)
-        self._picture.set_valign(Gtk.Align.FILL)
-        overlay.add_overlay(self._picture)
+        overlay.add_overlay(self._player.picture)
 
         gradient_box = Gtk.Box()
         gradient_box.add_css_class("camera-gradient-top")
@@ -167,89 +281,135 @@ class CameraCard(Gtk.Box):
             status in (CameraStatus.CONNECTING, CameraStatus.NO_SIGNAL, CameraStatus.ERROR)
         )
 
-    def _start_stream(self) -> None:
-        try:
-            pipeline = build_pipeline(self.camera.name, self.camera.rtsp_url)
-        except RuntimeError as exc:
-            self._update_status_ui(CameraStatus.ERROR)
-            logger.error("[%s] %s", self.camera.name, exc)
-            return
+    def stop(self) -> None:
+        self._player.stop()
 
-        sink = pipeline.get_by_name("sink")
-        paintable = sink.get_property("paintable")
-        if paintable is not None:
-            self._picture.set_paintable(paintable)
-            self._no_signal.set_visible(False)
 
-        sink.connect("notify::paintable", self._on_paintable_notify)
+# ---------------------------------------------------------------------------
+# Fila de cámara (vista de lista)
+# ---------------------------------------------------------------------------
 
-        bus = pipeline.get_bus()
-        bus.add_signal_watch()
-        bus.connect("message::error", self._on_bus_error)
-        bus.connect("message::state-changed", self._on_bus_state_changed)
-        bus.connect("message::eos", self._on_bus_eos)
 
-        self.state.pipeline = pipeline
-        pipeline.set_state(Gst.State.PLAYING)
+class CameraListRow(Gtk.Box):
+    __gtype_name__ = "CameraListRow"
 
-    def _on_paintable_notify(self, sink, _pspec) -> None:
-        paintable = sink.get_property("paintable")
-        if paintable is not None:
-            self._picture.set_paintable(paintable)
-            self._no_signal.set_visible(False)
-            self._update_status_ui(CameraStatus.LIVE)
+    def __init__(self, camera: CameraConfig):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.camera = camera
+        self.set_hexpand(True)
+        self.set_vexpand(False)
+        self.set_size_request(-1, 220)
+        self.set_overflow(Gtk.Overflow.HIDDEN)
 
-    def _on_bus_error(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
-        err, _debug = msg.parse_error()
-        logger.warning("[%s] %s", self.camera.name, err.message)
-        self._schedule_reconnect()
+        self.add_css_class("camera-list-row")
 
-    def _on_bus_eos(self, _bus: Gst.Bus, _msg: Gst.Message) -> None:
-        logger.info("[%s] End of stream", self.camera.name)
-        self._schedule_reconnect()
+        self._player = CameraPlayer(camera, on_status=self._update_status_ui)
+        self._build_ui()
+        self._player.start()
 
-    def _on_bus_state_changed(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
-        if msg.src != self.state.pipeline:
-            return
-        _old, new, _pending = msg.parse_state_changed()
-        if new == Gst.State.PLAYING:
-            self._update_status_ui(CameraStatus.LIVE)
-            self._reconnect_delay = 1
-        elif new == Gst.State.NULL:
-            self._update_status_ui(CameraStatus.NO_SIGNAL)
+    def _build_ui(self) -> None:
+        left_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        left_box.set_size_request(400, -1)
+        left_box.set_hexpand(False)
+        left_box.set_vexpand(False)
+        left_box.add_css_class("camera-list-preview-box")
+        self.append(left_box)
 
-    def _schedule_reconnect(self) -> None:
-        if self._reconnect_source is not None:
-            return
-        if self._reconnect_delay >= self._reconnect_max_delay:
-            self._update_status_ui(CameraStatus.ERROR)
-            self._reconnect_delay = self._reconnect_max_delay
-        else:
-            self._update_status_ui(CameraStatus.CONNECTING)
-        self._reconnect_source = GLib.timeout_add_seconds(
-            self._reconnect_delay, self._do_reconnect
+        top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        top_bar.set_margin_start(8)
+        top_bar.set_margin_end(8)
+        top_bar.set_margin_top(8)
+        top_bar.set_margin_bottom(6)
+        top_bar.set_valign(Gtk.Align.START)
+        top_bar.set_halign(Gtk.Align.FILL)
+        left_box.append(top_bar)
+
+        self._name_label = Gtk.Label(label=self.camera.name)
+        self._name_label.add_css_class("camera-name")
+        self._name_label.set_halign(Gtk.Align.START)
+        self._name_label.set_valign(Gtk.Align.CENTER)
+        top_bar.append(self._name_label)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        top_bar.append(spacer)
+
+        self._status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._status_box.add_css_class("camera-status-tag")
+        self._status_box.set_halign(Gtk.Align.END)
+        self._status_box.set_valign(Gtk.Align.CENTER)
+
+        self._status_dot = Gtk.Label(label="●")
+        self._status_dot.add_css_class("status-dot")
+        self._status_dot.set_valign(Gtk.Align.CENTER)
+        self._status_box.append(self._status_dot)
+
+        self._status_label = Gtk.Label(label="CON")
+        self._status_label.add_css_class("camera-status-text")
+        self._status_label.set_valign(Gtk.Align.CENTER)
+        self._status_box.append(self._status_label)
+
+        top_bar.append(self._status_box)
+
+        overlay = Gtk.Overlay()
+        overlay.add_css_class("camera-list-feed")
+        overlay.set_hexpand(True)
+        overlay.set_vexpand(True)
+        overlay.set_overflow(Gtk.Overflow.HIDDEN)
+        left_box.append(overlay)
+
+        main_child = Gtk.Box()
+        main_child.set_hexpand(True)
+        main_child.set_vexpand(True)
+        main_child.set_size_request(360, 180)
+        overlay.set_child(main_child)
+
+        overlay.add_overlay(self._player.picture)
+
+        self._no_signal = Gtk.Box()
+        self._no_signal.add_css_class("no-signal-overlay")
+        self._no_signal.set_valign(Gtk.Align.CENTER)
+        self._no_signal.set_halign(Gtk.Align.CENTER)
+        self._no_signal.set_visible(True)
+        ns_label = Gtk.Label(label="Conectando…")
+        ns_label.add_css_class("no-signal-text")
+        self._no_signal.append(ns_label)
+        overlay.add_overlay(self._no_signal)
+
+        right_spacer = Gtk.Box()
+        right_spacer.set_hexpand(True)
+        right_spacer.set_vexpand(True)
+        right_spacer.add_css_class("camera-list-spacer")
+        self.append(right_spacer)
+
+    def _update_status_ui(self, status: CameraStatus) -> None:
+        color_map = {
+            CameraStatus.CONNECTING: "status-connecting",
+            CameraStatus.LIVE: "status-live",
+            CameraStatus.RECORDING: "status-recording",
+            CameraStatus.NO_SIGNAL: "status-no-signal",
+            CameraStatus.ERROR: "status-error",
+        }
+        text_map = {
+            CameraStatus.CONNECTING: "CON",
+            CameraStatus.LIVE: "LIVE",
+            CameraStatus.RECORDING: "REC",
+            CameraStatus.NO_SIGNAL: "OFF",
+            CameraStatus.ERROR: "ERR",
+        }
+        css_class = color_map.get(status, "status-connecting")
+
+        for cls in color_map.values():
+            self._status_dot.remove_css_class(cls)
+
+        self._status_dot.add_css_class(css_class)
+        self._status_label.set_label(text_map.get(status, "---"))
+        self._no_signal.set_visible(
+            status in (CameraStatus.CONNECTING, CameraStatus.NO_SIGNAL, CameraStatus.ERROR)
         )
 
-    def _do_reconnect(self) -> bool:
-        self._reconnect_source = None
-        self._stop_pipeline()
-        self._update_status_ui(CameraStatus.CONNECTING)
-        self._reconnect_delay = min(self._reconnect_delay * 2, self._reconnect_max_delay)
-        self._start_stream()
-        return False
-
-    def _stop_pipeline(self) -> None:
-        if self.state.pipeline is not None:
-            bus = self.state.pipeline.get_bus()
-            bus.remove_signal_watch()
-            self.state.pipeline.set_state(Gst.State.NULL)
-            self.state.pipeline = None
-
     def stop(self) -> None:
-        if self._reconnect_source is not None:
-            GLib.source_remove(self._reconnect_source)
-            self._reconnect_source = None
-        self._stop_pipeline()
+        self._player.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -359,27 +519,29 @@ class Sidebar(Gtk.Box):
             btn = icon_button(icon, label, "nav-item")
             bottom.append(btn)
 
+    def set_camera_count(self, count: int) -> None:
+        s = "s" if count != 1 else ""
+        self._camera_count_label.set_label(f"{count} Camera{s} Online")
+
 
 # ---------------------------------------------------------------------------
 # Top bar
 # ---------------------------------------------------------------------------
 
 
-    def set_camera_count(self, count: int) -> None:
-        s = "s" if count != 1 else ""
-        self._camera_count_label.set_label(f"{count} Camera{s} Online")
-
-
 class TopBar(Gtk.Box):
     __gtype_name__ = "TopBar"
 
-    def __init__(self) -> None:
+    def __init__(self, on_layout_change: object | None = None) -> None:
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.add_css_class("topbar")
         self.set_margin_start(16)
         self.set_margin_end(16)
         self.set_margin_top(8)
         self.set_margin_bottom(8)
+
+        self._on_layout_change = on_layout_change
+        self._current_layout = "grid"
 
         tabs = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         all_btn = Gtk.Button(label="All Cameras")
@@ -402,18 +564,43 @@ class TopBar(Gtk.Box):
         toggle_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         toggle_box.add_css_class("layout-toggle")
 
-        grid_btn = Gtk.Button(label="grid_view")
-        grid_btn.add_css_class("layout-btn-active")
-        grid_btn.add_css_class("material-icon")
-        toggle_box.append(grid_btn)
+        self._grid_btn = Gtk.Button(label="grid_view")
+        self._grid_btn.add_css_class("layout-btn-active")
+        self._grid_btn.add_css_class("material-icon")
+        self._grid_btn.connect("clicked", self._on_grid_clicked)
+        toggle_box.append(self._grid_btn)
 
-        split_btn = Gtk.Button(label="splitscreen")
-        split_btn.add_css_class("layout-btn-inactive")
-        split_btn.add_css_class("material-icon")
-        toggle_box.append(split_btn)
+        self._list_btn = Gtk.Button(label="splitscreen")
+        self._list_btn.add_css_class("layout-btn-inactive")
+        self._list_btn.add_css_class("material-icon")
+        self._list_btn.connect("clicked", self._on_list_clicked)
+        toggle_box.append(self._list_btn)
 
         layout_row.append(toggle_box)
         self.append(layout_row)
+
+    def _set_layout(self, layout: str) -> None:
+        if layout == self._current_layout:
+            return
+        self._current_layout = layout
+        if layout == "grid":
+            self._grid_btn.remove_css_class("layout-btn-inactive")
+            self._grid_btn.add_css_class("layout-btn-active")
+            self._list_btn.remove_css_class("layout-btn-active")
+            self._list_btn.add_css_class("layout-btn-inactive")
+        else:
+            self._list_btn.remove_css_class("layout-btn-inactive")
+            self._list_btn.add_css_class("layout-btn-active")
+            self._grid_btn.remove_css_class("layout-btn-active")
+            self._grid_btn.add_css_class("layout-btn-inactive")
+        if self._on_layout_change is not None:
+            self._on_layout_change(layout)
+
+    def _on_grid_clicked(self, _btn: Gtk.Button) -> None:
+        self._set_layout("grid")
+
+    def _on_list_clicked(self, _btn: Gtk.Button) -> None:
+        self._set_layout("list")
 
 
 # ---------------------------------------------------------------------------
@@ -426,14 +613,17 @@ class CameraGrid(Gtk.Box):
 
     def __init__(self, cameras: list[CameraConfig]):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._cameras = list(cameras)
         self._cards: list[CameraCard] = []
+        self._rows: list[CameraListRow] = []
+        self._layout = "grid"
         self.add_css_class("camera-grid-container")
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_hexpand(True)
-        scrolled.set_has_frame(False)
-        self.append(scrolled)
+        self._scrolled = Gtk.ScrolledWindow()
+        self._scrolled.set_vexpand(True)
+        self._scrolled.set_hexpand(True)
+        self._scrolled.set_has_frame(False)
+        self.append(self._scrolled)
 
         self._flow = Gtk.FlowBox()
         self._flow.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -449,18 +639,65 @@ class CameraGrid(Gtk.Box):
         self._flow.set_valign(Gtk.Align.START)
         self._flow.set_halign(Gtk.Align.START)
         self._flow.add_css_class("camera-flow")
-        scrolled.set_child(self._flow)
 
-        for cam in cameras:
+        self._list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._list_box.set_margin_start(12)
+        self._list_box.set_margin_end(12)
+        self._list_box.set_margin_top(8)
+        self._list_box.set_margin_bottom(12)
+        self._list_box.set_hexpand(True)
+        self._list_box.set_vexpand(False)
+        self._list_box.set_valign(Gtk.Align.START)
+        self._list_box.set_halign(Gtk.Align.FILL)
+        self._list_box.add_css_class("camera-list-container")
+
+        self._build_grid()
+        self._build_list()
+        self._show_layout("grid")
+
+    def _build_grid(self) -> None:
+        for card in self._cards:
+            self._flow.remove(card)
+        self._cards.clear()
+        for cam in self._cameras:
             card = CameraCard(cam)
             self._cards.append(card)
             self._flow.append(card)
 
+    def _build_list(self) -> None:
+        for row in self._rows:
+            self._list_box.remove(row)
+        self._rows.clear()
+        for cam in self._cameras:
+            row = CameraListRow(cam)
+            self._rows.append(row)
+            self._list_box.append(row)
+
+    def _show_layout(self, layout: str) -> None:
+        self._layout = layout
+        if layout == "grid":
+            self._scrolled.set_child(self._flow)
+        else:
+            self._scrolled.set_child(self._list_box)
+
+    def set_layout(self, layout: str) -> None:
+        if layout == self._layout:
+            return
+        if layout not in ("grid", "list"):
+            return
+        self._show_layout(layout)
+
     def add_camera(self, camera: CameraConfig) -> None:
+        self._cameras.append(camera)
         card = CameraCard(camera)
         self._cards.append(card)
         self._flow.append(card)
+        row = CameraListRow(camera)
+        self._rows.append(row)
+        self._list_box.append(row)
 
     def shutdown(self) -> None:
         for card in self._cards:
             card.stop()
+        for row in self._rows:
+            row.stop()

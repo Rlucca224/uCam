@@ -294,6 +294,34 @@ window, .content-area {
   color: #666666;
 }
 
+/* ===== Camera List ===== */
+.camera-list-container {
+  background-color: #131313;
+}
+
+.camera-list-row {
+  background-color: #131313;
+  border: 1px solid #262626;
+  border-radius: 8px;
+  min-height: 220px;
+}
+
+.camera-list-preview-box {
+  background-color: #0a0a0a;
+  border-right: 1px solid #262626;
+  border-radius: 8px 0 0 8px;
+}
+
+.camera-list-feed {
+  background-color: #0a0a0a;
+  min-height: 180px;
+  border-radius: 0 0 0 8px;
+}
+
+.camera-list-spacer {
+  background-color: #131313;
+}
+
 /* ===== Dialog ===== */
 
 .dialog-title {

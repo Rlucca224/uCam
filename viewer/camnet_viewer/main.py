@@ -53,14 +53,15 @@ class MainWindow(Gtk.ApplicationWindow):
         content.add_css_class("content-area")
         main_box.append(content)
 
-        topbar = TopBar()
+        self._grid = CameraGrid(cameras)
+
+        topbar = TopBar(on_layout_change=self._grid.set_layout)
         content.append(topbar)
 
         top_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         top_sep.add_css_class("topbar-separator")
         content.append(top_sep)
 
-        self._grid = CameraGrid(cameras)
         content.append(self._grid)
 
         self._sidebar.set_camera_count(len(cameras))
