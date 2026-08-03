@@ -136,7 +136,7 @@ def discover_onvif_streams(
         raise RuntimeError("onvif-zeep no está instalado")
 
     host, port = _parse_endpoint(endpoint)
-    logger.info("ONVIF: conectando a %s:%d", host, port)
+    logger.info("ONVIF: conectando a %s:%d con usuario '%s'", host, port, user)
 
     wsdl_dir = _WSDL_DIR if _WSDL_DIR and os.path.isdir(_WSDL_DIR) else None
     cam = ONVIFCamera(host, port, user, password, wsdl_dir=wsdl_dir)
@@ -164,7 +164,10 @@ def discover_onvif_streams(
             )
             raw_url = str(uri.Uri)
             profile.url = normalize_rtsp_url(raw_url, user, password)
-            logger.info("ONVIF: perfil %s -> %s (raw: %s)", profile.name, profile.url, raw_url)
+            logger.info(
+                "ONVIF: perfil %s -> %s (raw: %s, user: %s)",
+                profile.name, profile.url, raw_url, user or "(none)",
+            )
         except Exception as exc:
             logger.warning(
                 "ONVIF: no se pudo obtener URI para %s: %s", profile.token, exc

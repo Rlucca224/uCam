@@ -255,6 +255,7 @@ class AddCameraDialog(Gtk.Window):
         self._onvif_profiles: list[StreamProfile] = []
         self._onvif_preview_pipeline: Gst.Pipeline | None = None
         self._onvif_start_id: int | None = None
+        self._ignore_profile_changes: bool = False
 
         # Buttons
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -440,9 +441,9 @@ class AddCameraDialog(Gtk.Window):
         self._onvif_start_id = GLib.idle_add(self._start_onvif_preview_with_profile, 0)
 
     def _set_profile_without_signal(self, idx: int) -> None:
-        self._profiles_dropdown.handler_block_by_func(self._on_profile_changed)
+        self._ignore_profile_changes = True
         self._profiles_dropdown.set_selected(idx)
-        self._profiles_dropdown.handler_unblock_by_func(self._on_profile_changed)
+        self._ignore_profile_changes = False
 
     def _selected_onvif_url(self) -> str:
         idx = self._profiles_dropdown.get_selected()
@@ -451,6 +452,8 @@ class AddCameraDialog(Gtk.Window):
         return ""
 
     def _on_profile_changed(self, dropdown, _pspec) -> None:
+        if self._ignore_profile_changes:
+            return
         idx = dropdown.get_selected()
         if idx < 0 or idx >= len(self._onvif_profiles):
             return
