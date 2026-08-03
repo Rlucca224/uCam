@@ -390,7 +390,7 @@ class AddCameraDialog(Gtk.Window):
         if self._preview_pipeline is not None:
             self._preview_picture.set_paintable(None)
             self._preview_pipeline.set_state(Gst.State.NULL)
-            self._preview_pipeline.get_state(Gst.CLOCK_TIME_NONE)
+            self._preview_pipeline.get_state(Gst.SECOND)
             self._preview_pipeline = None
         self._preview_area.set_visible(False)
         self._preview_btn.set_label("Preview")
@@ -564,7 +564,7 @@ class AddCameraDialog(Gtk.Window):
             logger.info("ONVIF preview: set NULL")
             self._onvif_preview_pipeline.set_state(Gst.State.NULL)
             logger.info("ONVIF preview: wait NULL")
-            self._onvif_preview_pipeline.get_state(Gst.CLOCK_TIME_NONE)
+            self._onvif_preview_pipeline.get_state(Gst.SECOND)
             logger.info("ONVIF preview: NULL reached")
             self._onvif_preview_pipeline = None
         self._current_preview_idx = -1
