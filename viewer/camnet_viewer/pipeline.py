@@ -20,6 +20,7 @@ def build_pipeline(camera_name: str, rtsp_url: str) -> Gst.Pipeline:
     src.set_property("location", rtsp_url)
     src.set_property("latency", 200)
     src.set_property("timeout", 10_000_000)
+    src.set_property("protocols", 4)
 
     decode = Gst.ElementFactory.make("decodebin", "decode")
     convert = Gst.ElementFactory.make("videoconvert", "convert")

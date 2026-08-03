@@ -290,7 +290,8 @@ class AddCameraDialog(Gtk.Window):
     def _on_add_clicked(self, _widget: Gtk.Widget) -> None:
         logger.info("Add Camera clicked")
         self._stop_preview()
-        self._stop_onvif_preview()
+        self._cancel_onvif_preview_start()
+        self._stop_onvif_preview_pipeline()
 
         is_onvif = self._proto_combo.get_selected() == 1
 
