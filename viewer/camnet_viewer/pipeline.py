@@ -5,8 +5,7 @@ from __future__ import annotations
 import gi
 
 gi.require_version("Gst", "1.0")
-gi.require_version("GstRtsp", "1.0")
-from gi.repository import Gst, GstRtsp  # noqa: E402
+from gi.repository import Gst  # noqa: E402
 
 Gst.init(None)
 
@@ -21,8 +20,6 @@ def build_pipeline(camera_name: str, rtsp_url: str) -> Gst.Pipeline:
     src.set_property("location", rtsp_url)
     src.set_property("latency", 200)
     src.set_property("timeout", 10_000_000)
-    # Forzar TCP mejora compatibilidad con cámaras sin auth y firewalls
-    src.set_property("protocols", GstRtsp.RTSPLowerTrans.TCP)
 
     decode = Gst.ElementFactory.make("decodebin", "decode")
     convert = Gst.ElementFactory.make("videoconvert", "convert")

@@ -235,6 +235,8 @@ class AddCameraDialog(Gtk.Window):
 
         self._onvif_preview_picture = Gtk.Picture()
         self._onvif_preview_picture.set_size_request(320, 180)
+        self._onvif_preview_picture.set_can_shrink(True)
+        self._onvif_preview_picture.set_content_fit(Gtk.ContentFit.COVER)
         self._onvif_preview_picture.add_css_class("preview-video")
         self._onvif_preview_picture.set_hexpand(True)
         self._onvif_preview_area.append(self._onvif_preview_picture)
