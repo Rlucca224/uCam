@@ -10,8 +10,10 @@ from gi.repository import Gst  # noqa: E402
 Gst.init(None)
 
 
-def build_pipeline(camera_name: str, rtsp_url: str) -> Gst.Pipeline:
-    """Construye el pipeline: rtspsrc -> decodebin -> videoconvert -> gtk4paintablesink."""
+def build_pipeline(
+    camera_name: str, rtsp_url: str, use_decodebin3: bool = True
+) -> Gst.Pipeline:
+    """Construye el pipeline: rtspsrc -> decodebin(decodebin3) -> videoconvert -> gtk4paintablesink."""
     pipeline = Gst.Pipeline.new(f"cam-{camera_name}")
 
     src = Gst.ElementFactory.make("rtspsrc", "src")
@@ -22,7 +24,8 @@ def build_pipeline(camera_name: str, rtsp_url: str) -> Gst.Pipeline:
     src.set_property("timeout", 10_000_000)
     src.set_property("protocols", 4)
 
-    decode = Gst.ElementFactory.make("decodebin3", "decode")
+    decodebin_name = "decodebin3" if use_decodebin3 else "decodebin"
+    decode = Gst.ElementFactory.make(decodebin_name, "decode")
     convert = Gst.ElementFactory.make("videoconvert", "convert")
     sink = Gst.ElementFactory.make("gtk4paintablesink", "sink")
     if sink is None:
@@ -41,6 +44,9 @@ def build_pipeline(camera_name: str, rtsp_url: str) -> Gst.Pipeline:
         struct = caps.get_structure(0)
         name = struct.get_name()
         if not name.startswith("application/x-rtp"):
+            return
+        media_type = struct.get_string("media")
+        if media_type != "video":
             return
         sinkpad = decode.get_static_pad("sink")
         if not sinkpad.is_linked():

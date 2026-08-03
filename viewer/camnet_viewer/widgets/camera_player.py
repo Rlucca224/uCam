@@ -31,6 +31,9 @@ class CameraPlayer:
         self._reconnect_max_delay = 30
         self._reconnect_source: int | None = None
 
+        self._use_decodebin3 = True
+        self._decodebin_errors = 0
+
         self._picture = Gtk.Picture()
         self._picture.set_can_shrink(True)
         self._picture.set_content_fit(Gtk.ContentFit.COVER)
@@ -149,7 +152,9 @@ class CameraPlayer:
 
     def _start_stream(self) -> None:
         try:
-            pipeline = build_pipeline(self.camera.name, self.camera.rtsp_url)
+            pipeline = build_pipeline(
+                self.camera.name, self.camera.rtsp_url, self._use_decodebin3
+            )
         except RuntimeError as exc:
             self._notify_status(CameraStatus.ERROR)
             logger.error("[%s] %s", self.camera.name, exc)
@@ -189,6 +194,20 @@ class CameraPlayer:
     def _on_bus_error(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         err, _debug = msg.parse_error()
         logger.warning("[%s] %s", self.camera.name, err.message)
+        msg_text = err.message.lower()
+        self._decodebin_errors += 1
+        if self._decodebin_errors >= 2 and (
+            "broken bit stream" in msg_text
+            or "no caps set" in msg_text
+            or "not-negotiated" in msg_text
+        ):
+            self._use_decodebin3 = not self._use_decodebin3
+            self._decodebin_errors = 0
+            logger.info(
+                "[%s] Switching to %s",
+                self.camera.name,
+                "decodebin3" if self._use_decodebin3 else "decodebin",
+            )
         self._schedule_reconnect()
 
     def _on_bus_eos(self, _bus: Gst.Bus, _msg: Gst.Message) -> None:
@@ -202,6 +221,7 @@ class CameraPlayer:
         if new == Gst.State.PLAYING:
             self._notify_status(CameraStatus.LIVE)
             self._reconnect_delay = 1
+            self._decodebin_errors = 0
         elif new == Gst.State.NULL:
             self._notify_status(CameraStatus.NO_SIGNAL)
 
