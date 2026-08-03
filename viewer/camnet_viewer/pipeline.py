@@ -22,7 +22,7 @@ def build_pipeline(camera_name: str, rtsp_url: str) -> Gst.Pipeline:
     src.set_property("timeout", 10_000_000)
     src.set_property("protocols", 4)
 
-    decode = Gst.ElementFactory.make("decodebin", "decode")
+    decode = Gst.ElementFactory.make("decodebin3", "decode")
     convert = Gst.ElementFactory.make("videoconvert", "convert")
     sink = Gst.ElementFactory.make("gtk4paintablesink", "sink")
     if sink is None:
