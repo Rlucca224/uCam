@@ -816,7 +816,8 @@ class CameraGrid(Gtk.Box):
         self._flow.set_margin_bottom(12)
         self._flow.set_homogeneous(False)
         self._flow.set_valign(Gtk.Align.START)
-        self._flow.set_halign(Gtk.Align.START)
+        self._flow.set_halign(Gtk.Align.FILL)
+        self._flow.set_hexpand(True)
         self._flow.add_css_class("camera-flow")
 
         self._list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
