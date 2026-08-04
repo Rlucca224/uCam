@@ -31,6 +31,9 @@ class CameraPlayer:
         self._reconnect_max_delay = 30
         self._reconnect_source: int | None = None
 
+        self._use_decodebin3 = True
+        self._switched_decodebin = False
+
         self._picture = Gtk.Picture()
         self._picture.set_can_shrink(True)
         self._picture.set_content_fit(Gtk.ContentFit.COVER)
@@ -113,17 +116,18 @@ class CameraPlayer:
         if name and "/" in name:
             self._codec = name.split("/")[-1].upper()
 
-    def _setup_caps_probe(self, pipeline: Gst.Pipeline) -> None:
-        convert = pipeline.get_by_name("convert")
-        if convert is None:
-            return
-        src_pad = convert.get_static_pad("src")
-        if src_pad is not None:
-            src_pad.add_probe(
-                Gst.PadProbeType.EVENT_DOWNSTREAM,
-                self._on_video_pad_probe,
-                None,
-            )
+    def _on_decodebin_pad_added(self, _decodebin: Gst.Element, pad: Gst.Pad) -> None:
+        caps = pad.get_current_caps()
+        if caps is None:
+            caps = pad.get_allowed_caps()
+        if caps is not None:
+            name = caps.to_string().split(",")[0] if caps.to_string() else ""
+            if "video" in name:
+                self._extract_caps_info(caps)
+                self._notify_info()
+        pad.add_probe(
+            Gst.PadProbeType.EVENT_DOWNSTREAM, self._on_video_pad_probe, None
+        )
 
     def _on_video_pad_probe(
         self,
@@ -148,13 +152,17 @@ class CameraPlayer:
 
     def _start_stream(self) -> None:
         try:
-            pipeline = build_pipeline(self.camera.name, self.camera.rtsp_url)
+            pipeline = build_pipeline(
+                self.camera.name, self.camera.rtsp_url, self._use_decodebin3
+            )
         except RuntimeError as exc:
             self._notify_status(CameraStatus.ERROR)
             logger.error("[%s] %s", self.camera.name, exc)
             return
 
-        self._setup_caps_probe(pipeline)
+        decode = pipeline.get_by_name("decode")
+        if decode is not None:
+            decode.connect("pad-added", self._on_decodebin_pad_added)
 
         sink = pipeline.get_by_name("sink")
         paintable = sink.get_property("paintable")
@@ -186,6 +194,14 @@ class CameraPlayer:
     def _on_bus_error(self, _bus: Gst.Bus, msg: Gst.Message) -> None:
         err, _debug = msg.parse_error()
         logger.warning("[%s] %s", self.camera.name, err.message)
+        if not self._switched_decodebin and self._use_decodebin3:
+            msg_lower = err.message.lower()
+            if "no caps set" in msg_lower or "broken bit stream" in msg_lower:
+                self._use_decodebin3 = False
+                self._switched_decodebin = True
+                logger.info("[%s] Fallback to decodebin", self.camera.name)
+                self._schedule_reconnect()
+                return
         self._schedule_reconnect()
 
     def _on_bus_eos(self, _bus: Gst.Bus, _msg: Gst.Message) -> None:
