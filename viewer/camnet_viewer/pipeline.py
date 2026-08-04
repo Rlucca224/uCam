@@ -52,6 +52,7 @@ def build_pipeline(
             return
         media_type = struct.get_string("media")
         if media_type != "video":
+            # TODO: audio se linkeará cuando se implemente camera management
             return
         sinkpad = decode.get_static_pad("sink")
         if not sinkpad.is_linked():
