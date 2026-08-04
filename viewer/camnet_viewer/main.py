@@ -13,6 +13,8 @@ from gi.repository import Gtk, Gdk  # noqa: E402
 
 from .cli import parse_cameras
 from .dialogs import AddCameraDialog
+from .models import CameraConfig
+from .store import CameraStore
 from .styles import load_css
 from .widgets import Sidebar, TopBar, CameraGrid
 
@@ -25,6 +27,17 @@ def setup_logging() -> None:
     )
 
 
+def _merge_cameras(
+    stored: list[CameraConfig], cli: list[CameraConfig]
+) -> list[CameraConfig]:
+    merged: dict[str, CameraConfig] = {}
+    for c in stored:
+        merged[c.rtsp_url] = c
+    for c in cli:
+        merged[c.rtsp_url] = c
+    return list(merged.values())
+
+
 # ---------------------------------------------------------------------------
 # Ventana principal
 # ---------------------------------------------------------------------------
@@ -33,9 +46,10 @@ def setup_logging() -> None:
 class MainWindow(Gtk.ApplicationWindow):
     __gtype_name__ = "MainWindow"
 
-    def __init__(self, app: Gtk.Application, cameras: list):
+    def __init__(self, app: Gtk.Application, cameras: list, store: CameraStore):
         super().__init__(application=app, title="uCam — Dashboard")
         self.set_default_size(1280, 800)
+        self._store = store
 
         main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.set_child(main_box)
@@ -66,13 +80,23 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._sidebar.set_camera_count(len(cameras))
 
+    def _cameras_list(self) -> list[CameraConfig]:
+        cameras: list[CameraConfig] = []
+        for card in self._grid._cards:
+            if card.camera is not None:
+                cameras.append(
+                    CameraConfig(name=card.camera.name, rtsp_url=card.camera.rtsp_url)
+                )
+        return cameras
+
     def _on_add_device(self) -> None:
         dialog = AddCameraDialog(self, on_add=self._add_camera)
         dialog.present()
 
-    def _add_camera(self, config) -> None:
+    def _add_camera(self, config: CameraConfig) -> None:
         self._grid.add_camera(config)
         self._sidebar.set_camera_count(len(self._grid._cards))
+        self._store.save(self._cameras_list())
 
     def shutdown(self) -> None:
         self._grid.shutdown()
@@ -85,12 +109,18 @@ class MainWindow(Gtk.ApplicationWindow):
 
 def main() -> None:
     setup_logging()
-    cameras = parse_cameras()
+
+    store = CameraStore()
+    stored = store.load()
+    cli_cameras = parse_cameras()
+    cameras = _merge_cameras(stored, cli_cameras)
+    if cameras != stored:
+        store.save(cameras)
 
     load_css(None)
 
     def on_activate(app: Gtk.Application) -> None:
-        win = MainWindow(app, cameras)
+        win = MainWindow(app, cameras, store)
 
         def on_shutdown(*_args: object) -> None:
             win.shutdown()
