@@ -10,59 +10,55 @@ from gi.repository import Gst  # noqa: E402
 Gst.init(None)
 
 
-def build_pipeline(
-    camera_name: str, rtsp_url: str, use_decodebin3: bool = True
-) -> Gst.Pipeline:
-    """Construye el pipeline: rtspsrc -> decodebin(decodebin3) -> videoconvert -> gtk4paintablesink."""
+def build_pipeline(camera_name: str, rtsp_url: str) -> Gst.Pipeline:
+    """Construye el pipeline: rtspsrc -> rtph264depay -> avdec_h264 -> videoconvert -> gtk4paintablesink."""
     pipeline = Gst.Pipeline.new(f"cam-{camera_name}")
 
     src = Gst.ElementFactory.make("rtspsrc", "src")
     if src is None:
         raise RuntimeError("rtspsrc no disponible — instalá gst-plugins-good")
-    src.set_property("location", rtsp_url)
-    src.set_property("latency", 200)
-    src.set_property("timeout", 10_000_000)
-    src.set_property("protocols", 4)
 
-    decodebin_name = "decodebin3" if use_decodebin3 else "decodebin"
-    decode = Gst.ElementFactory.make(decodebin_name, "decode")
+    depay = Gst.ElementFactory.make("rtph264depay", "depay")
+    if depay is None:
+        raise RuntimeError("rtph264depay no disponible — instalá gst-plugins-good")
+
+    decoder = Gst.ElementFactory.make("avdec_h264", "decoder")
+    if decoder is None:
+        raise RuntimeError("avdec_h264 no disponible — instalá gst-libav")
+
     convert = Gst.ElementFactory.make("videoconvert", "convert")
     sink = Gst.ElementFactory.make("gtk4paintablesink", "sink")
     if sink is None:
         raise RuntimeError("gtk4paintablesink no disponible — instalá gst-plugin-gtk4")
 
+    src.set_property("location", rtsp_url)
+    src.set_property("latency", 200)
+    src.set_property("timeout", 10_000_000)
+    src.set_property("protocols", 4)
+
     pipeline.add(src)
-    pipeline.add(decode)
+    pipeline.add(depay)
+    pipeline.add(decoder)
     pipeline.add(convert)
     pipeline.add(sink)
+
+    depay.link(decoder)
+    decoder.link(convert)
     convert.link(sink)
 
-    def on_rtsp_pad_added(_rtspsrc: Gst.Element, pad: Gst.Pad) -> None:
+    def on_pad_added(_rtspsrc: Gst.Element, pad: Gst.Pad) -> None:
         caps = pad.get_current_caps() or pad.query_caps()
         if caps is None:
             return
         struct = caps.get_structure(0)
-        name = struct.get_name()
-        if not name.startswith("application/x-rtp"):
+        if not struct.get_name().startswith("application/x-rtp"):
             return
         media_type = struct.get_string("media")
         if media_type != "video":
             return
-        sinkpad = decode.get_static_pad("sink")
-        if not sinkpad.is_linked():
-            pad.link(sinkpad)
+        if not depay.get_static_pad("sink").is_linked():
+            pad.link(depay.get_static_pad("sink"))
 
-    def on_decode_pad_added(_decodebin: Gst.Element, pad: Gst.Pad) -> None:
-        caps = pad.get_current_caps() or pad.query_caps()
-        if caps is None:
-            return
-        struct = caps.get_structure(0)
-        if struct.get_name().startswith("video/"):
-            sinkpad = convert.get_static_pad("sink")
-            if not sinkpad.is_linked():
-                pad.link(sinkpad)
-
-    src.connect("pad-added", on_rtsp_pad_added)
-    decode.connect("pad-added", on_decode_pad_added)
+    src.connect("pad-added", on_pad_added)
 
     return pipeline
