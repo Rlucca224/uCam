@@ -67,7 +67,11 @@ class MainWindow(Gtk.ApplicationWindow):
         content.add_css_class("content-area")
         main_box.append(content)
 
-        self._grid = CameraGrid(cameras)
+        self._grid = CameraGrid(
+            cameras,
+            on_delete=self._on_delete_camera,
+            on_config=self._on_config_camera,
+        )
 
         topbar = TopBar(on_layout_change=self._grid.set_layout)
         content.append(topbar)
@@ -97,6 +101,15 @@ class MainWindow(Gtk.ApplicationWindow):
         self._grid.add_camera(config)
         self._sidebar.set_camera_count(len(self._grid._cards))
         self._store.save(self._cameras_list())
+
+    def _on_delete_camera(self, camera: CameraConfig) -> None:
+        self._grid.remove_camera(camera.rtsp_url)
+        self._sidebar.set_camera_count(len(self._grid._cards))
+        self._store.save(self._cameras_list())
+
+    def _on_config_camera(self, camera: CameraConfig) -> None:
+        # TODO: open camera management dialog
+        pass
 
     def shutdown(self) -> None:
         self._grid.shutdown()

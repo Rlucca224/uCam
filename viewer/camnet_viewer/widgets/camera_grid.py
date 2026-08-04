@@ -17,12 +17,19 @@ from .camera_player import CameraPlayer
 class CameraGrid(Gtk.Box):
     __gtype_name__ = "CameraGrid"
 
-    def __init__(self, cameras: list[CameraConfig]):
+    def __init__(
+        self,
+        cameras: list[CameraConfig],
+        on_delete: object = None,
+        on_config: object = None,
+    ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._cameras = list(cameras)
         self._players: dict[str, CameraPlayer] = {}
         self._cards: list[CameraCard] = []
         self._rows: list[CameraListRow] = []
+        self._on_delete = on_delete
+        self._on_config = on_config
         self._layout = ""
         self.add_css_class("camera-grid-container")
 
@@ -75,7 +82,12 @@ class CameraGrid(Gtk.Box):
         self._cards.clear()
         for cam in self._cameras:
             player = self._players[cam.rtsp_url]
-            card = CameraCard(cam, player=player)
+            card = CameraCard(
+                cam,
+                player=player,
+                on_delete=self._on_delete,
+                on_config=self._on_config,
+            )
             self._cards.append(card)
             self._flow.append(card)
 
@@ -85,7 +97,12 @@ class CameraGrid(Gtk.Box):
         self._rows.clear()
         for cam in self._cameras:
             player = self._players[cam.rtsp_url]
-            row = CameraListRow(cam, player=player)
+            row = CameraListRow(
+                cam,
+                player=player,
+                on_delete=self._on_delete,
+                on_config=self._on_config,
+            )
             self._rows.append(row)
             self._list_box.append(row)
 
@@ -108,15 +125,45 @@ class CameraGrid(Gtk.Box):
         player = CameraPlayer(camera)
         self._players[camera.rtsp_url] = player
 
-        card = CameraCard(camera, player=player)
+        card = CameraCard(
+            camera,
+            player=player,
+            on_delete=self._on_delete,
+            on_config=self._on_config,
+        )
         self._cards.append(card)
         self._flow.append(card)
 
-        row = CameraListRow(camera, player=player)
+        row = CameraListRow(
+            camera,
+            player=player,
+            on_delete=self._on_delete,
+            on_config=self._on_config,
+        )
         self._rows.append(row)
         self._list_box.append(row)
 
         player.start()
+
+    def remove_camera(self, rtsp_url: str) -> None:
+        self._cameras = [c for c in self._cameras if c.rtsp_url != rtsp_url]
+        player = self._players.pop(rtsp_url, None)
+        if player is not None:
+            player.stop()
+
+        for i, card in enumerate(self._cards):
+            if card.camera.rtsp_url == rtsp_url:
+                card.stop()
+                self._flow.remove(card)
+                self._cards.pop(i)
+                break
+
+        for i, row in enumerate(self._rows):
+            if row.camera.rtsp_url == rtsp_url:
+                row.stop()
+                self._list_box.remove(row)
+                self._rows.pop(i)
+                break
 
     def shutdown(self) -> None:
         for card in self._cards:

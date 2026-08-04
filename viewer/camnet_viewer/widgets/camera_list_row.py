@@ -6,7 +6,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Gtk, GLib  # noqa: E402
+from gi.repository import Gtk, GLib, Gio  # noqa: E402
 
 from ..models import CameraConfig, CameraStatus
 from .camera_player import CameraPlayer
@@ -15,9 +15,17 @@ from .camera_player import CameraPlayer
 class CameraListRow(Gtk.Box):
     __gtype_name__ = "CameraListRow"
 
-    def __init__(self, camera: CameraConfig, player: CameraPlayer | None = None):
+    def __init__(
+        self,
+        camera: CameraConfig,
+        player: CameraPlayer | None = None,
+        on_delete: object = None,
+        on_config: object = None,
+    ):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.camera = camera
+        self._on_delete = on_delete
+        self._on_config = on_config
         self.set_hexpand(True)
         self.set_vexpand(False)
         self.set_size_request(-1, 155)
@@ -32,8 +40,41 @@ class CameraListRow(Gtk.Box):
         self._player.add_info_listener(self._update_info)
         self._uptime_source: int | None = None
         self._build_ui()
+        self._setup_context_menu()
         if self._own_player:
             self._player.start()
+
+    def _setup_context_menu(self) -> None:
+        if self._on_delete is None and self._on_config is None:
+            return
+
+        menu = Gio.Menu()
+        if self._on_config is not None:
+            menu.append("Config", "row.config")
+        if self._on_delete is not None:
+            menu.append("Delete", "row.delete")
+
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(self)
+        popover.set_has_arrow(False)
+
+        def on_action(action_name: str, _param):
+            if action_name == "row.delete" and self._on_delete is not None:
+                self._on_delete(self.camera)
+            elif action_name == "row.config" and self._on_config is not None:
+                self._on_config(self.camera)
+
+        group = Gio.SimpleActionGroup()
+        for name in ("row.delete", "row.config"):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda a, p, n=name: on_action(n, p))
+            group.add_action(action)
+        self.insert_action_group("row", group)
+
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(3)
+        gesture.connect("pressed", lambda _g, _n, _x, _y: popover.popup())
+        self.add_controller(gesture)
 
     def _build_ui(self) -> None:
         # --- Left: preview ---
