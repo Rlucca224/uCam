@@ -27,6 +27,97 @@ RECORDINGS_CSS = """
   padding: 6px 10px;
 }
 
+/* popup del dropdown alineado al ancho del boton */
+dropdown.recordings-filter popover.background,
+dropdown.recordings-filter popover {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+dropdown.recordings-filter popover.background > arrow,
+dropdown.recordings-filter popover > arrow {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+dropdown.recordings-filter popover.background contents,
+dropdown.recordings-filter popover contents {
+  background-color: #2f2d31;
+  border: 1px solid #26262a;
+  border-radius: 9px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  padding: 1px;
+  min-width: 147px;
+}
+
+dropdown.recordings-filter popover scrolledwindow,
+dropdown.recordings-filter popover viewport,
+dropdown.recordings-filter popover listview,
+dropdown.recordings-filter popover list {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  color: #FFFFFF;
+}
+
+dropdown.recordings-filter popover listview {
+  padding: 0;
+}
+
+dropdown.recordings-filter popover row,
+dropdown.recordings-filter popover listitem {
+  background-color: #2f2d31;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 5px;
+  margin: 0;
+  padding: 6px 10px;
+  min-height: 0;
+  font-size: 13px;
+  font-weight: 400;
+  outline: none;
+  box-shadow: none;
+}
+
+dropdown.recordings-filter popover row label,
+dropdown.recordings-filter popover listitem label,
+dropdown.recordings-filter popover row image,
+dropdown.recordings-filter popover listitem image {
+  color: #FFFFFF;
+}
+
+dropdown.recordings-filter popover row:hover,
+dropdown.recordings-filter popover listitem:hover {
+  background-color: #403e47;
+}
+
+dropdown.recordings-filter popover row:selected,
+dropdown.recordings-filter popover row.selected,
+dropdown.recordings-filter popover row:checked,
+dropdown.recordings-filter popover listitem:selected,
+dropdown.recordings-filter popover listitem.selected,
+dropdown.recordings-filter popover listitem:checked {
+  background-color: #2f2d31;
+  color: #FFFFFF;
+}
+
+dropdown.recordings-filter popover row:selected:hover,
+dropdown.recordings-filter popover row:checked:hover,
+dropdown.recordings-filter popover listitem:selected:hover,
+dropdown.recordings-filter popover listitem:checked:hover {
+  background-color: #403e47;
+}
+
+dropdown.recordings-filter popover row:active,
+dropdown.recordings-filter popover listitem:active {
+  background-color: #141414;
+}
+
 .recordings-refresh-btn {
   background-color: #1b1b1b;
   border: 1px solid #262626;

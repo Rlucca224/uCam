@@ -94,6 +94,42 @@ DIALOG_CSS = """
   padding: 6px 12px;
 }
 
+.dialog-dropdown popover.background,
+.dialog-dropdown popover {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.dialog-dropdown popover.background > arrow,
+.dialog-dropdown popover > arrow {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.dialog-dropdown popover.background contents,
+.dialog-dropdown popover contents {
+  background-color: #2f2d31;
+  border: 1px solid #26262a;
+  border-radius: 9px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  padding: 1px;
+}
+
+.dialog-dropdown popover row,
+.dialog-dropdown popover listitem {
+  background-color: #2f2d31;
+  color: #FFFFFF;
+}
+
+.dialog-dropdown popover row:hover,
+.dialog-dropdown popover listitem:hover {
+  background-color: #403e47;
+}
+
 window.transient-for {
   background-color: #131313;
   color: #FFFFFF;
