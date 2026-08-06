@@ -12,11 +12,14 @@ from .helpers import icon_button
 class Sidebar(Gtk.Box):
     __gtype_name__ = "Sidebar"
 
-    def __init__(self, on_add_device: object = None) -> None:
+    def __init__(self, on_add_device: object = None, on_navigate: object = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add_css_class("sidebar")
         self.set_size_request(256, -1)
         self._on_add_device = on_add_device
+        self._on_navigate = on_navigate
+        self._active_section = "cameras"
+        self._nav_buttons: dict[str, Gtk.Button] = {}
 
         self._build_header()
         self._build_nav()
@@ -75,15 +78,19 @@ class Sidebar(Gtk.Box):
         nav.append(sep)
 
         items = [
-            ("dashboard", "Dashboard", False),
-            ("videocam", "Cameras", True),
-            ("video_library", "Recordings", False),
-            ("warning", "Events", False),
-            ("tune", "Camera Management", False),
+            ("dashboard", "Dashboard", "dashboard"),
+            ("videocam", "Cameras", "cameras"),
+            ("video_library", "Recordings", "recordings"),
+            ("warning", "Events", "events"),
+            ("tune", "Camera Management", "camera_management"),
         ]
-        for icon, label, active in items:
+        for icon, label, section in items:
+            active = section == self._active_section
             css = "nav-item-active" if active else "nav-item"
             btn = icon_button(icon, label, css)
+            if self._on_navigate:
+                btn.connect("clicked", lambda _b, s=section: self._on_navigate(s))
+            self._nav_buttons[section] = btn
             nav.append(btn)
 
     def _build_bottom(self) -> None:
@@ -114,3 +121,13 @@ class Sidebar(Gtk.Box):
     def set_camera_count(self, count: int) -> None:
         s = "s" if count != 1 else ""
         self._camera_count_label.set_label(f"{count} Camera{s} Online")
+
+    def set_active(self, section: str) -> None:
+        for name, btn in self._nav_buttons.items():
+            if name == section:
+                btn.remove_css_class("nav-item")
+                btn.add_css_class("nav-item-active")
+            else:
+                btn.remove_css_class("nav-item-active")
+                btn.add_css_class("nav-item")
+        self._active_section = section

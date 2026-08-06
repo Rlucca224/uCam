@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse, urlunparse
 
-logger = logging.getLogger("camnet.viewer")
+logger = logging.getLogger("ucam.viewer")
 
 
 try:

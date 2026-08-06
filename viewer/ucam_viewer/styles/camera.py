@@ -72,7 +72,7 @@ CAMERA_CSS = """
   color: #4adf9d;
 }
 .status-recording {
-  color: #ffb4ab;
+  color: #ff5252;
 }
 .status-no-signal {
   color: #666666;
@@ -155,15 +155,18 @@ CAMERA_CSS = """
 
 .camera-list-action-btn {
   background: none;
-  border: 1px solid #333333;
-  color: #A1A1A1;
+  border: 1px solid #555555;
+  color: #FFFFFF;
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
 }
 .camera-list-action-btn:hover {
-  border-color: #555555;
+  border-color: #777777;
   color: #FFFFFF;
   background-color: #1f1f1f;
+}
+.camera-list-action-btn:active {
+  background-color: #141414;
 }
 """

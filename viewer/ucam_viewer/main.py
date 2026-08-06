@@ -16,7 +16,15 @@ from .dialogs import AddCameraDialog
 from .models import CameraConfig
 from .store import CameraStore
 from .styles import load_css
-from .widgets import Sidebar, TopBar, CameraGrid
+from .widgets import Sidebar, TopBar, CameraGrid, RecordingsView
+
+_SECTION_TITLES = {
+    "dashboard": "Dashboard",
+    "cameras": "Cameras",
+    "recordings": "Recordings",
+    "events": "Events",
+    "camera_management": "Camera Management",
+}
 
 
 def setup_logging() -> None:
@@ -47,14 +55,17 @@ class MainWindow(Gtk.ApplicationWindow):
     __gtype_name__ = "MainWindow"
 
     def __init__(self, app: Gtk.Application, cameras: list, store: CameraStore):
-        super().__init__(application=app, title="uCam — Dashboard")
+        super().__init__(application=app, title="uCam — Cameras")
         self.set_default_size(1280, 800)
         self._store = store
 
         main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.set_child(main_box)
 
-        self._sidebar = Sidebar(on_add_device=self._on_add_device)
+        self._sidebar = Sidebar(
+            on_add_device=self._on_add_device,
+            on_navigate=self._navigate,
+        )
         main_box.append(self._sidebar)
 
         sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
@@ -67,6 +78,14 @@ class MainWindow(Gtk.ApplicationWindow):
         content.add_css_class("content-area")
         main_box.append(content)
 
+        self._stack = Gtk.Stack()
+        self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        content.append(self._stack)
+
+        cameras_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        cameras_page.set_hexpand(True)
+        cameras_page.set_vexpand(True)
+
         self._grid = CameraGrid(
             cameras,
             on_delete=self._on_delete_camera,
@@ -74,15 +93,38 @@ class MainWindow(Gtk.ApplicationWindow):
         )
 
         topbar = TopBar(on_layout_change=self._grid.set_layout)
-        content.append(topbar)
+        cameras_page.append(topbar)
 
         top_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         top_sep.add_css_class("topbar-separator")
-        content.append(top_sep)
+        cameras_page.append(top_sep)
 
-        content.append(self._grid)
+        cameras_page.append(self._grid)
+        self._stack.add_named(cameras_page, "cameras")
+
+        self._stack.set_visible_child_name("cameras")
+
+        self._recordings_view = RecordingsView(self)
+        self._stack.add_named(self._recordings_view, "recordings")
+        for section in ("dashboard", "events", "camera_management"):
+            self._stack.add_named(self._empty_section(), section)
 
         self._sidebar.set_camera_count(len(cameras))
+
+    def _empty_section(self) -> Gtk.Box:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        page.set_hexpand(True)
+        page.set_vexpand(True)
+        return page
+
+    def _navigate(self, section: str) -> None:
+        if section not in _SECTION_TITLES:
+            return
+        self._stack.set_visible_child_name(section)
+        if section == "recordings":
+            self._recordings_view.refresh()
+        self._sidebar.set_active(section)
+        self.set_title(f"uCam — {_SECTION_TITLES[section]}")
 
     def _cameras_list(self) -> list[CameraConfig]:
         cameras: list[CameraConfig] = []
@@ -108,8 +150,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._store.save(self._cameras_list())
 
     def _on_config_camera(self, camera: CameraConfig) -> None:
-        # TODO: open camera management dialog
-        pass
+        self._navigate("camera_management")
 
     def shutdown(self) -> None:
         self._grid.shutdown()
@@ -141,7 +182,7 @@ def main() -> None:
         app.connect("shutdown", on_shutdown)
         win.present()
 
-    app = Gtk.Application(application_id="ai.camnet.viewer")
+    app = Gtk.Application(application_id="ai.ucam.viewer")
     app.connect("activate", on_activate)
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)

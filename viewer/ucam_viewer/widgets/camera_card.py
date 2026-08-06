@@ -9,7 +9,9 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Gio  # noqa: E402
 
 from ..models import CameraConfig, CameraStatus
+from ..recorder import RecordingController
 from .camera_player import CameraPlayer
+from .helpers import popup_at_pointer
 
 
 class CameraCard(Gtk.Box):
@@ -35,6 +37,8 @@ class CameraCard(Gtk.Box):
 
         self._own_player = player is None
         self._player = player or CameraPlayer(camera)
+        self._recorder = RecordingController(camera.name, camera.rtsp_url)
+        self._recording = False
         self._player.add_status_listener(self._update_status_ui)
         self._player.add_paintable_listener(self._on_paintable)
         self._build_ui()
@@ -46,24 +50,29 @@ class CameraCard(Gtk.Box):
         if self._on_delete is None and self._on_config is None:
             return
 
-        menu = Gio.Menu()
+        self._menu = Gio.Menu()
         if self._on_config is not None:
-            menu.append("Config", "card.config")
+            self._menu.append("Config", "card.config")
+        self._menu.append("Record", "card.record")
         if self._on_delete is not None:
-            menu.append("Delete", "card.delete")
+            self._menu.append("Delete", "card.delete")
 
-        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover = Gtk.PopoverMenu.new_from_model(self._menu)
         popover.set_parent(self)
         popover.set_has_arrow(False)
+        popover.set_position(Gtk.PositionType.BOTTOM)
+        popover.set_halign(Gtk.Align.START)
 
         def on_action(action_name: str, _param):
-            if action_name == "card.delete" and self._on_delete is not None:
+            if action_name == "delete" and self._on_delete is not None:
                 self._on_delete(self.camera)
-            elif action_name == "card.config" and self._on_config is not None:
+            elif action_name == "config" and self._on_config is not None:
                 self._on_config(self.camera)
+            elif action_name == "record":
+                self._toggle_recording()
 
         group = Gio.SimpleActionGroup()
-        for name in ("card.delete", "card.config"):
+        for name in ("delete", "config", "record"):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda a, p, n=name: on_action(n, p))
             group.add_action(action)
@@ -71,8 +80,24 @@ class CameraCard(Gtk.Box):
 
         gesture = Gtk.GestureClick.new()
         gesture.set_button(3)
-        gesture.connect("pressed", lambda _g, _n, _x, _y: popover.popup())
+        gesture.connect(
+            "pressed",
+            popup_at_pointer(popover, on_before_popup=self._before_menu),
+        )
         self.add_controller(gesture)
+
+    def _before_menu(self) -> None:
+        label = "Stop" if self._recorder.is_recording else "Record"
+        self._menu.remove(1)
+        self._menu.insert(1, label, "card.record")
+
+    def _toggle_recording(self) -> None:
+        if self._recorder.is_recording:
+            self._recorder.stop()
+        else:
+            self._recorder.start()
+        self._recording = self._recorder.is_recording
+        self._update_status_ui(self._player.state.status)
 
     def _build_ui(self) -> None:
         overlay = Gtk.Overlay()
@@ -151,6 +176,8 @@ class CameraCard(Gtk.Box):
         self._picture.set_paintable(paintable)
 
     def _update_status_ui(self, status: CameraStatus) -> None:
+        if self._recording:
+            status = CameraStatus.RECORDING
         color_map = {
             CameraStatus.CONNECTING: "status-connecting",
             CameraStatus.LIVE: "status-live",
@@ -178,5 +205,6 @@ class CameraCard(Gtk.Box):
 
     def stop(self) -> None:
         self._picture.set_paintable(None)
+        self._recorder.stop()
         if self._own_player:
             self._player.stop()

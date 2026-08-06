@@ -22,4 +22,8 @@ window, .content-area {
   background-color: #000000;
   color: #FFFFFF;
 }
+
+window.message {
+  background-color: #353434;
+}
 """

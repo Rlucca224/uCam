@@ -16,7 +16,7 @@ from ..models import CameraConfig
 from ..onvif_discovery import StreamProfile, discover_onvif_streams
 from ..pipeline import build_pipeline
 
-logger = logging.getLogger("camnet.viewer")
+logger = logging.getLogger("ucam.viewer")
 Gst.init(None)
 
 

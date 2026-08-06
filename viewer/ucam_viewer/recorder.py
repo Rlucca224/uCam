@@ -1,0 +1,78 @@
+"""Per-camera recording controller (wraps stream-manager's Recorder in a thread)."""
+
+from __future__ import annotations
+
+import logging
+import sys
+import threading
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "stream-manager"))
+
+from recorder import Recorder  # noqa: E402
+
+from .recordings import RECORDINGS_DIR
+
+
+class RecordingController:
+    """Start/stop recording for a single camera on a background thread."""
+
+    def __init__(
+        self,
+        camera_name: str,
+        rtsp_url: str,
+        output_dir: Path | None = None,
+        segment_seconds: int = 60,
+        rtsp_timeout_seconds: int = 10,
+    ) -> None:
+        self.camera_name = camera_name
+        self.rtsp_url = rtsp_url
+        self.segment_seconds = segment_seconds
+        self.rtsp_timeout_seconds = rtsp_timeout_seconds
+        self.output_dir = output_dir or RECORDINGS_DIR
+        self._recorder: Recorder | None = None
+        self._thread: threading.Thread | None = None
+        self._logger = self._make_logger()
+
+    def _make_logger(self) -> logging.Logger:
+        logger = logging.getLogger(f"ucam.recorder.{self.camera_name}")
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                    datefmt="%H:%M:%S",
+                )
+            )
+            logger.addHandler(handler)
+        return logger
+
+    @property
+    def is_recording(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self) -> None:
+        if self.is_recording:
+            return
+        self._recorder = Recorder(
+            camera_name=self.camera_name,
+            rtsp_url=self.rtsp_url,
+            output_dir=self.output_dir,
+            segment_seconds=self.segment_seconds,
+            rtsp_timeout_seconds=self.rtsp_timeout_seconds,
+            logger=self._logger,
+        )
+        self._thread = threading.Thread(
+            target=self._recorder.run,
+            name=f"recorder-{self.camera_name}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._recorder is not None:
+            self._recorder.request_shutdown()
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=5)
+        self._recorder = None
+        self._thread = None

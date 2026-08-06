@@ -1,16 +1,24 @@
-# CamNet — Sistema propio de gestión de cámaras de seguridad (VMS)
+# uCam / uCam — Sistema propio de gestión de cámaras de seguridad (VMS)
 
-> Documento de referencia del proyecto. Úsalo como skill/contexto persistente en OpenCode
-> para mantener coherencia de arquitectura, stack y roadmap a través de todas las sesiones
-> de desarrollo. Cuando generes código para este proyecto, respeta las decisiones aquí
-> documentadas salvo que se actualice explícitamente esta misma sección.
+> Documento de referencia del proyecto. Úsalo como skill/contexto persistente
+> para mantener coherencia de arquitectura, stack y roadmap a través de todas
+> las sesiones de desarrollo. Cuando generes código para este proyecto, respeta
+> las decisiones aquí documentadas salvo que se actualice explícitamente esta
+> misma sección.
+
+> **REGLAS DE TRABAJO OBLIGATORIAS**:
+> 1. Ante cualquier duda técnica (API, propiedades CSS, comportamiento de GTK,
+>    GStreamer, FFmpeg, etc.) **lo primero es consultar la documentación oficial**
+>    (docs.gtk.org, docs.rs, man pages, etc.) o buscar en la web. NO escribir
+>    scripts de prueba, probes, ni experimentar a ciegas antes de leer la doc.
+> 2. Seguir SIEMPRE la guía visual de la sección 1.4 para cualquier control nuevo.
 
 ## 0. Objetivo del documento
 
-Este archivo es la fuente de verdad del proyecto CamNet. Contiene:
-- La arquitectura completa del sistema.
+Este archivo es la fuente de verdad del proyecto uCam (UI de escritorio: **uCam**). Contiene:
+- La arquitectura completa del sistema (planificada y real).
 - El stack tecnológico decidido, por fase.
-- El roadmap dividido en hitos, cada uno con sub-objetivos y criterio de "hecho".
+- El roadmap dividido en hitos, con estado actual y criterio de "hecho".
 - Convenciones de código y estructura de repositorio.
 - Un registro de decisiones técnicas (para no repetir discusiones ya cerradas).
 
@@ -18,7 +26,11 @@ Este archivo es la fuente de verdad del proyecto CamNet. Contiene:
 Management System) propio capaz de descubrir, conectar, visualizar y grabar todas las
 cámaras IP de la red doméstica del usuario, usando protocolos estándar (RTSP, ONVIF).
 Prioridad: aprender arquitectura de sistemas y programación de bajo nivel (concurrencia,
-streaming), no llegar lo antes posible a un producto terminado.
+streaming, pipelines de video), no llegar lo antes posible a un producto terminado.
+
+**Nombre:**
+- **uCam** — nombre del sistema / dominio del código (`ucam_viewer`, logs, config).
+- **uCam** — nombre de la aplicación de escritorio (título de ventana, branding UI).
 
 ---
 
@@ -26,272 +38,392 @@ streaming), no llegar lo antes posible a un producto terminado.
 
 ### 1.1 Componentes
 
-El sistema se divide en 5 componentes desacoplados, cada uno con responsabilidad única:
+El sistema se divide en componentes desacoplados. El frontend de fase 1 **no es web**:
+es un visor nativo GTK4 + GStreamer. Un frontend web (HLS) queda como opción futura
+para acceso remoto, no como camino actual.
 
-1. **Discovery/Registry** — descubre cámaras en la red (WS-Discovery / ONVIF multicast,
-   con fallback a nmap/arp-scan) y persiste su configuración: IP, credenciales, RTSP URL,
-   endpoint ONVIF, perfiles de stream disponibles.
-2. **Stream Manager** — orquesta un proceso por cámara que consume el RTSP y lo convierte
-   en algo consumible: HLS para reproducción en vivo, segmentos de archivo para grabación.
-3. **Storage/Recording** — política de grabación (continua o por evento), rotación de
-   disco por tiempo/espacio, indexado de grabaciones para búsqueda posterior.
-4. **API + Frontend** — backend REST que expone cámaras/streams/grabaciones, UI web para
-   ver el grid de cámaras y reproducir grabaciones.
-5. **Analítica (fase 2)** — detección de movimiento/objetos sobre los streams, disparo de
-   eventos que la fase de grabación puede consumir.
+| # | Componente | Responsabilidad | Estado |
+|---|---|---|---|
+| 1 | **Discovery / Registry** | Descubrir cámaras (ONVIF; luego WS-Discovery + nmap/arp-scan) y persistir config (nombre, RTSP URL, endpoint ONVIF, perfiles) | Parcial: ONVIF por endpoint manual + store JSON |
+| 2 | **Live Viewer (uCam)** | UI de escritorio multi-cámara: grid/lista, preview, add/delete, estados de conexión | Avanzado (sección Cameras funcional) |
+| 3 | **Stream / Recording Manager** | Orquestar grabación (y a futuro políticas) por cámara vía FFmpeg; un proceso por cámara | Hito 1 CLI listo; **no integrado** al viewer |
+| 4 | **Storage / Index** | Segmentos en disco, rotación por tiempo/espacio, índice para búsqueda | Solo archivos sueltos en `recordings/` |
+| 5 | **Analítica (fase 2)** | Movimiento/objetos → eventos → grabación inteligente | No empezado |
+| 6 | **Acceso remoto (opcional, futuro)** | API + HLS/WebRTC para ver desde navegador fuera de la LAN | Explícitamente **fuera del camino crítico** |
 
-### 1.2 Flujo de datos
+### 1.2 Flujo de datos (actual y objetivo cercano)
 
 ```
-[Cámara IP] --RTSP--> [Stream Manager] --HLS--> [Frontend/Browser]
-                              |
-                              +--segmentos--> [Storage/Recording] --index--> [DB]
-                              |
-[Discovery] --config--> [DB] <--API-- [Backend] <--REST-- [Frontend]
-                              |
-                    (fase 2) [Analítica] --eventos--> [Storage] (grabación por evento)
+                    ┌─────────────────────────────────────────┐
+                    │  uCam (GTK4 + GStreamer)                │
+                    │  CameraPlayer × N                       │
+[Cámara IP]--RTSP-->│  rtspsrc → decodebin3 → gtk4paintablesink│
+                    │  CameraStore → ~/.config/ucam/         │
+                    └─────────────────────────────────────────┘
+                              │
+                              │ (pendiente: integrar)
+                              ▼
+                    ┌─────────────────────────────────────────┐
+                    │  stream-manager (FFmpeg, 1 proc/cámara) │
+                    │  segmentos MP4 → recordings/            │
+                    └─────────────────────────────────────────┘
+
+ONVIF (manual hoy): endpoint + creds → GetProfiles + GetStreamUri → RTSP URL
 ```
 
-### 1.3 Decisiones de diseño ya tomadas
+Flujo objetivo a medio plazo (sin web):
 
-- **RTSP no se reproduce directo en navegador** → se transcodea a HLS vía FFmpeg. Se elige
-  HLS sobre WebRTC para la primera versión por simplicidad de implementación, aceptando
-  3-6s de latencia. WebRTC queda como mejora de fase futura si hace falta tiempo real.
-- **Un proceso FFmpeg por cámara**, gestionado por el Stream Manager (no un solo proceso
-  multiplexando todo — más simple de razonar, aislar fallos y reiniciar individualmente).
-- **Discovery híbrido**: WS-Discovery/ONVIF como método principal, nmap/arp-scan como
-  fallback para dispositivos que no respondan al protocolo estándar (ya usado manualmente
-  por el usuario, se automatiza en el Hito 4).
-- **Metadata en SQLite** al inicio (cámaras, grabaciones, eventos). Migrar a Postgres solo
-  si el proyecto escala más allá de uso doméstico.
+```
+[Cámara IP] --RTSP--+--> [Viewer GStreamer] --> pantalla
+                    |
+                    +--> [RecordingManager] --> segmentos --> [índice] --> UI Recordings
+[Discovery] --> [Store/DB]
+(fase 2) [Analítica] --eventos--> [RecordingManager]
+```
+
+### 1.3 Decisiones de diseño vigentes
+
+- **Visor nativo GTK4 + GStreamer** para live view en fase 1 (latencia baja, HW decode,
+  sin transcode intermedio). **No** se implementa HLS/React como frontend principal.
+- **HLS / web / WebRTC** solo si más adelante se necesita acceso remoto o multi-cliente;
+  no bloquean el roadmap de desktop.
+- **Un proceso FFmpeg por cámara** para grabación (aislar fallos, reinicio individual).
+  El live view usa **un pipeline GStreamer por cámara** dentro del proceso del viewer.
+- **Un `CameraPlayer` compartido** entre vista grid y lista (no dos conexiones RTSP a la
+  misma cámara por layout).
+- **decodebin3** como decoder principal (HW cuando hay); fallback único a **decodebin**
+  si aparece "No caps set" / "Broken bit stream". Sin más heurísticas de codec.
+- **RTSP por TCP** en el viewer (`rtspsrc protocols=4`, latency ~200 ms) — más fiable
+  en redes domésticas que UDP.
+- **Discovery híbrido** (plan): WS-Discovery/ONVIF principal; nmap/arp-scan fallback.
+  Hoy: ONVIF con endpoint ingresado a mano + normalización de URLs estilo Dahua/Hikvision.
+- **Metadata**: JSON en `~/.config/ucam/cameras.json` ahora; migrar a **SQLite** cuando
+  haga falta indexar grabaciones/eventos. Postgres solo si escala más allá de lo doméstico.
+- **Credenciales**: no en el repositorio. Store local y/o env (`CAMNET_RTSP_URL`). El
+  JSON actual guarda URLs con credenciales embebidas (aceptable en prototipo casero;
+  mejorar antes de multi-usuario).
+
+### 1.4 Guía visual UI (estilo vigente — mantener en nuevos controles)
+
+Paleta y formas ya decididas para la app. **Todo control nuevo debe heredar este estilo**:
+- **Base**: fondo negro `#000000`, texto blanco, radio de esquinas = 5px (mismo que
+  `$button_radius` del tema Default de GTK4; verify con fuente oficial si hay dudas).
+- **Botones de acción (Play / Folder / Delete)**: **sin contorno** (`border: none`),
+  `background-color: #1b1b1d`, `border-radius: 5px`, `padding: 6px 11px`,
+  `min-height: 0`, font 12px/500; hover `#1f1f22`, active `#141414`. Icono
+  `.material-icon` interior: `min-width: 0`, `font-size: 13px` (ver nota abajo).
+  Delete: texto `#ffb4ab`, hover `#2a1c1c`.
+- **Botón Refresh**: fondo `#1b1b1b`, contorno `1px solid #262626`, `border-radius: 5px`,
+  `padding: 7px 10px`, `min-height: 0`, `font-size: 14.667px`, hover `#1f1f1f`.
+- **DropDown de filtro**: entre texto y flecha sin hueco grande — esto sale de
+  `min-width` (hoy 0) y del `spacing` del Box interno. El radio del botón interno del
+  dropdown lo da el tema (5px), no el CSS propio (GTK4 CSS **sí** soporta selectores
+  descendientes como `.recording-action-btn .material-icon`).
+- **Junto**: dropdown y refresh (46px vs 34px de altura) ya están alineados: se iguala
+  por tamaño de botón interno del dropdown (~34px) y estilos de refresh.
+- **Fila de grabación**: fondo `#161618`, contorno `1px solid #26262a`,
+  `border-radius: 10px`, `padding: 10px`; hover `#1c1c1f` + borde `#333338` (el usuario
+  lo quiere MANTENER). Thumb: fondo `#0d0d0f`, radio 6px.
+- **Lección aprendida (importante)**: en GTK4/Pango la altura de un `Label` con icono
+  glyph impar, del `font-size` del icono (ascent+descent del glifo, no `line-height`).
+  Para poder controlar la altura de un botón, hay que reducir el `font-size` del icono,
+  no jugar con `line-height`.
 
 ---
 
 ## 2. Stack tecnológico
 
-### Fase 1 — Prototipado y validación de arquitectura (Python)
+### Fase 1 — Python (vigente)
 
 | Capa | Elección | Motivo |
 |---|---|---|
-| Backend/API | Python + FastAPI | Rápido de iterar, tipado con Pydantic, async nativo |
-| ONVIF | `onvif-zeep-async` | La librería más madura disponible en Python |
-| Video | FFmpeg (via `subprocess`) | Estándar de facto, hace RTSP→HLS con un comando |
-| DB | SQLite + SQLAlchemy | Cero fricción para prototipar, migrable después |
-| Frontend | React + `hls.js` | `hls.js` es la forma estándar de reproducir HLS en browsers que no lo soportan nativo |
-| Discovery | `wsdiscovery` (Python) + scripts nmap/arp-scan existentes | Cubre el caso estándar y el fallback |
+| UI live | **GTK4 + PyGObject** | Nativo Linux, CSS, widgets ricos, sin browser |
+| Video live | **GStreamer** (`rtspsrc`, `decodebin3`, `gtk4paintablesink`) | Pipeline real, HW accel, paintable en GTK4 |
+| Grabación | **FFmpeg** vía `subprocess` (`-c copy`, segment muxer) | Sin reencode, bajo CPU, segmentos con timestamp |
+| ONVIF | **`onvif-zeep`** (síncrono; discovery en thread + `GLib.idle_add`) | Maduro en Python; WSDL del paquete |
+| Persistencia cámaras | JSON (`CameraStore`) → SQLite más adelante | Cero fricción; swap anticipado en código |
+| Discovery red (pendiente) | WS-Discovery + nmap/arp-scan | Cubre ONVIF y dispositivos mudos |
+| Empaquetado viewer | `viewer/.venv` + entry `ucam-viewer.py` | Re-exec al venv si existe |
 
 ### Fase 2 — Reescritura de componentes críticos (Rust)
 
-Una vez validada la arquitectura en Python, el **Stream Manager** se reescribe en Rust
-como servicio independiente, comunicándose con el backend por HTTP/gRPC. Motivo:
-concurrencia real sin GIL, sin pausas de GC en el pipeline de video, menor huella de
-memoria si se despliega en hardware modesto (Raspberry Pi / mini PC / NAS).
+Cuando la arquitectura desktop + grabación esté **estable e integrada**, el
+**Recording / Stream Manager** (no necesariamente el viewer GTK) puede reescribirse
+en Rust como servicio independiente.
 
 | Capa | Elección | Motivo |
 |---|---|---|
-| Runtime async | `tokio` | Estándar de facto para async en Rust |
-| Video | `gstreamer-rs` o `ffmpeg-next` | Pipelines de video serios; GStreamer más flexible, ffmpeg-next más directo |
-| RTSP puro (alternativa) | `retina` | Cliente RTSP nativo en Rust, evita spawnear FFmpeg si se quiere más control |
-| Web framework (si aplica) | `axum` | Se integra bien con tokio |
-| ONVIF | crate `onvif` (inmaduro) | Esperar más SOAP/XML manual que en Python; posible cuello de botella |
+| Runtime async | `tokio` | Estándar async en Rust |
+| Video | `gstreamer-rs` o `ffmpeg-next` | Pipelines serios; GStreamer más flexible |
+| RTSP nativo (alt.) | `retina` | Evitar spawnear FFmpeg si se quiere más control |
+| Comunicación | HTTP/gRPC hacia el resto del sistema | Contrato estable durante la migración |
 
-**Nota de riesgo:** ONVIF en Rust es el punto más débil del ecosistema. Es aceptable
-mantener el Discovery/Registry en Python (fase 1) y no migrarlo a Rust salvo necesidad
-concreta — no todo el sistema tiene que terminar en el mismo lenguaje.
+**Nota:** ONVIF en Rust es débil. Discovery/Registry puede quedarse en Python.
+No todo el sistema tiene que migrar de lenguaje.
 
-### Librerías/herramientas transversales
+### Herramientas transversales
 
-- **FFmpeg**: pieza central en ambas fases, para transcodificación RTSP→HLS y grabación.
-- **nmap / arp-scan**: ya usados manualmente por el usuario para descubrimiento; se
-  integran como fallback automatizado en el Hito 4.
-- **Docker Compose**: para levantar el conjunto de servicios (backend, stream manager,
-  frontend) de forma reproducible, especialmente útil de cara al despliegue final.
+- **FFmpeg / ffprobe**: grabación y probe de conectividad.
+- **GStreamer + plugins** (incl. `gtk4paintablesink`): live view obligatorio.
+- **nmap / arp-scan**: fallback de discovery (Hito 4).
+- **Docker Compose**: opcional más adelante si hay servicios headless (recorder daemon,
+  API remota); no es requisito del viewer de escritorio.
 
----
+### Stack descartado / diferido como camino principal
 
-## 3. Conceptos técnicos clave (glosario de referencia)
-
-- **RTSP (Real Time Streaming Protocol)**: protocolo por el que viaja el video crudo desde
-  la cámara. URL típica: `rtsp://usuario:pass@ip:554/stream1`.
-- **ONVIF**: estándar soportado por la mayoría de cámaras IP para descubrimiento,
-  configuración y control (PTZ, perfiles de stream, etc.), basado en SOAP/XML.
-- **WS-Discovery**: mecanismo de descubrimiento multicast (puerto 3702) usado por ONVIF
-  para que los dispositivos se anuncien en la red sin conocer su IP de antemano.
-- **HLS (HTTP Live Streaming)**: formato de streaming basado en segmentos `.ts` + playlist
-  `.m3u8`, reproducible directo en navegador con `hls.js`. Mayor latencia, mucho más simple
-  de implementar que WebRTC.
-- **WebRTC**: streaming casi en tiempo real, pero requiere señalización, ICE/STUN/TURN;
-  significativamente más complejo de implementar correctamente.
-- **GetStreamUri**: llamada ONVIF que devuelve la URL RTSP real de un perfil de stream de
-  la cámara — evita tener que adivinar/configurar la URL a mano.
+| Idea original | Estado |
+|---|---|
+| React + `hls.js` como frontend v1 | **Diferido** — no es el frontend de fase 1 |
+| FastAPI sirviendo HLS en vivo | **Diferido** — solo si hay acceso remoto |
+| RTSP → HLS con latencia 3–6 s para uso local | **Reemplazado** por GStreamer nativo |
 
 ---
 
-## 4. Estructura de repositorio propuesta
+## 3. Conceptos técnicos clave (glosario)
+
+- **RTSP**: protocolo del video desde la cámara. URL típica:
+  `rtsp://usuario:pass@ip:554/stream1`. Algunas marcas (Dahua/Hikvision) meten
+  credenciales en el path (`user=…_password=…`); el viewer las normaliza a
+  `user:pass@host`.
+- **ONVIF**: estándar SOAP/XML para discovery, perfiles y control (PTZ, etc.).
+- **WS-Discovery**: multicast puerto 3702; anuncio de dispositivos ONVIF sin IP previa.
+- **GetStreamUri**: ONVIF → URL RTSP real de un perfil (evita adivinar paths).
+- **GStreamer pipeline (live)**: `rtspsrc` → `decodebin3`/`decodebin` → `videoconvert`
+  → `gtk4paintablesink` → `Gtk.Picture`.
+- **FFmpeg segment recording**: `-f segment -segment_time N -strftime 1` + `-c copy`.
+- **HLS / WebRTC**: relevantes solo para un eventual cliente web remoto; no para el
+  uso local del VMS en fase 1.
+
+---
+
+## 4. Estructura de repositorio (real)
 
 ```
-camnet/
-├── backend/                 # FastAPI: API REST, modelos, DB
-│   ├── app/
-│   │   ├── api/              # routers (cameras, streams, recordings)
-│   │   ├── models/            # SQLAlchemy models
-│   │   ├── onvif/             # wrapper sobre onvif-zeep-async
-│   │   └── discovery/         # WS-Discovery + fallback nmap/arp-scan
-│   └── tests/
-├── stream-manager/           # Fase 1: subprocess FFmpeg orquestado desde Python
-│                              # Fase 2: reescrito en Rust, servicio independiente
-├── frontend/                  # React + hls.js
-│   └── src/
-│       ├── components/        # CameraGrid, StreamPlayer, RecordingBrowser
-│       └── api/                # cliente REST
-├── storage/                   # grabaciones (montado como volumen, no versionado)
-├── docker-compose.yml
-└── camnet-project-skill.md    # este documento
+uCam/   (repo; sistema uCam)
+├── stream-manager/
+│   └── recorder.py              # Hito 1: grabación RTSP 1 cámara, reconexión + backoff
+├── viewer/
+│   ├── ucam-viewer.py         # entry point (re-exec a .venv si existe)
+│   ├── requirements.txt         # PyGObject, onvif-zeep
+│   ├── .venv/                   # entorno local (no versionar secrets)
+│   └── ucam_viewer/
+│       ├── main.py              # Gtk.Application + MainWindow
+│       ├── cli.py               # --camera NOMBRE=URL, CAMNET_RTSP_URL
+│       ├── models.py            # CameraConfig, CameraStatus, CameraState
+│       ├── pipeline.py          # build_pipeline GStreamer
+│       ├── store.py             # ~/.config/ucam/cameras.json
+│       ├── onvif_discovery.py   # perfiles + GetStreamUri + normalize_rtsp_url
+│       ├── dialogs/             # AddCameraDialog (RTSP | ONVIF + preview)
+│       ├── widgets/             # Sidebar, TopBar, CameraGrid, Card, ListRow, Player
+│       └── styles/              # CSS GTK4 modular (base, sidebar, topbar, camera, …)
+├── recordings/                  # segmentos MP4 de prueba (no es storage definitivo)
+└── .opencode/skills/
+    └── ucam-project-skill/
+        └── SKILL.md             # este documento
 ```
+
+**Runtime config (fuera del repo):**
+- `~/.config/ucam/cameras.json` — lista de `{name, rtsp_url}`.
+
+**Aún no existen (y no hay que inventarlos sin necesidad):** `backend/`, `frontend/` React,
+`docker-compose.yml` como piezas del camino crítico.
 
 ---
 
 ## 5. Roadmap por hitos
 
-Cada hito es un proyecto funcional en sí mismo — al terminarlo tenés algo tangible
-corriendo, no solo piezas sueltas.
+Cada hito es un entregable usable. Los checkboxes reflejan el **estado real del código**.
 
 ### Hito 1 — Un solo stream por línea de comandos
-**Objetivo:** validar la conexión básica a una cámara real y entender sus particularidades
-(timeouts, reconexión, autenticación).
+**Objetivo:** validar RTSP real (timeouts, reconexión, auth) y grabar a disco.
 
 Sub-objetivos:
-- [ ] Obtener la RTSP URL de una cámara (a mano o vía ONVIF `GetStreamUri`).
-- [ ] Script Python que invoque FFmpeg para grabar segmentos de N segundos a disco.
-- [ ] Manejo de reconexión automática si la cámara se cae o hay timeout.
-- [ ] Logging básico de eventos (conexión, desconexión, error).
+- [x] Obtener RTSP URL (manual / ONVIF `GetStreamUri`).
+- [x] Script Python + FFmpeg: segmentos de N segundos a disco (`recorder.py`).
+- [x] Reconexión automática con backoff exponencial.
+- [x] Logging de conexión / desconexión / error.
+- [ ] Validación formal 24 h contra cámara real (criterio de "hecho" original).
 
-**Criterio de "hecho":** dejás el script corriendo 24hs contra una cámara real y sobrevive
-a al menos una caída/reconexión sin intervención manual.
+**Criterio de "hecho":** el script corre ~24 h y sobrevive al menos una caída/reconexión
+sin intervención manual.
 
-**Riesgos/gotchas:** algunas cámaras cierran la conexión RTSP si no reciben keep-alive;
-verificar el comportamiento real de tus marcas específicas.
+**Dónde está:** `stream-manager/recorder.py`. Salida de prueba en `recordings/`.
 
 ---
 
-### Hito 2 — Verlo en el navegador
-**Objetivo:** pipeline completo cámara → navegador.
+### Hito 2 — Live view nativo (reemplaza “verlo en el navegador”)
+**Objetivo:** ver video en vivo en escritorio con baja latencia.
+
+> **Pivot:** el plan original era FFmpeg→HLS + FastAPI + hls.js. Se reemplazó por
+> GStreamer embebido en GTK4. El criterio de valor es el mismo (ver el stream en vivo);
+> el medio no.
 
 Sub-objetivos:
-- [ ] FFmpeg generando HLS (`-f hls`) en vez de solo grabar.
-- [ ] Servidor HTTP mínimo (FastAPI) sirviendo el `.m3u8` y los segmentos `.ts`.
-- [ ] Página HTML simple con `hls.js` reproduciendo el stream.
+- [x] Pipeline GStreamer RTSP → `gtk4paintablesink`.
+- [x] Widget de reproducción con estados (CONNECTING / LIVE / NO_SIGNAL / ERROR).
+- [x] Reconexión automática en el player.
+- [x] Fallback decodebin3 → decodebin documentado.
+- [x] Preview al agregar cámara.
 
-**Criterio de "hecho":** abrís una URL en el navegador y ves el video en vivo de la cámara
-con latencia aceptable (<10s).
+**Criterio de "hecho":** abrís uCam y ves al menos una cámara en vivo de forma estable.
+
+**Dónde está:** `viewer/ucam_viewer/` (`pipeline.py`, `widgets/camera_player.py`).
 
 ---
 
 ### Hito 3 — Multi-cámara + registry
-**Objetivo:** generalizar de "una cámara hardcodeada" a "N cámaras gestionadas".
+**Objetivo:** N cámaras gestionadas, no una hardcodeada.
 
 Sub-objetivos:
-- [ ] Modelo de datos en SQLite: tabla `cameras` (ip, credenciales, rtsp_url, nombre).
-- [ ] API REST: `POST/GET/DELETE /cameras`.
-- [ ] Stream Manager como proceso que lanza/mata un FFmpeg por cámara según el registry.
-- [ ] Frontend: grid mostrando todas las cámaras activas simultáneamente.
+- [x] Modelo mínimo `CameraConfig` (name, rtsp_url).
+- [x] Persistencia (JSON `CameraStore`; SQLite pendiente).
+- [x] UI multi-cámara: grid + lista, un player por cámara compartido entre layouts.
+- [x] Add / delete desde UI; merge con CLI `--camera`.
+- [x] ONVIF en Add Camera: endpoint + perfiles + preview + add.
+- [ ] Camera Management real (editar, reconectar, elegir perfil).
+- [ ] Integrar el Recording Manager al registry (hoy el recorder es CLI aparte).
+- [ ] Migrar store a SQLite cuando se indexen grabaciones.
 
-**Criterio de "hecho":** agregás una cámara nueva vía API/UI y aparece transmitiendo en el
-grid sin reiniciar el sistema.
+**Criterio de "hecho":** agregás una cámara por UI y aparece en vivo sin reiniciar;
+sobrevive reinicio de la app (persistencia).
+
+**Estado:** criterio principal cumplido; management y grabación unificada pendientes.
 
 ---
 
 ### Hito 4 — Discovery automatizado
-**Objetivo:** eliminar la carga manual de cámaras.
+**Objetivo:** no depender de copiar endpoints a mano.
 
 Sub-objetivos:
-- [ ] Implementar WS-Discovery (multicast puerto 3702) para encontrar dispositivos ONVIF.
-- [ ] Al encontrar un dispositivo, consultar sus perfiles y `GetStreamUri` automáticamente.
-- [ ] Fallback: script de nmap/arp-scan para detectar IPs que no respondan a ONVIF, y
-      dejarlas como "pendiente de configuración manual" en vez de perderlas silenciosamente.
-- [ ] Botón "Escanear red" en el frontend que dispare el discovery y muestre resultados.
+- [ ] WS-Discovery (multicast 3702).
+- [ ] Al encontrar dispositivo: perfiles + `GetStreamUri` (reutilizar `onvif_discovery`).
+- [ ] Fallback nmap/arp-scan → “pendiente de configuración manual”.
+- [ ] Botón “Escanear red” en uCam.
 
-**Criterio de "hecho":** con las cámaras conectadas a la red pero no registradas, un
-"escaneo" las encuentra y las deja listas para agregar con un clic.
+**Criterio de "hecho":** con cámaras en la red no registradas, un escaneo las lista y
+permite agregarlas con un clic (tras credenciales si hace falta).
 
 ---
 
-### Hito 5 — Grabación con retención
-**Objetivo:** pasar de "streaming efímero" a "sistema de grabación real".
+### Hito 5 — Grabación con retención + UI
+**Objetivo:** de “recorder CLI suelto” a sistema de grabación usable.
 
 Sub-objetivos:
-- [ ] Grabación continua a disco en paralelo al streaming en vivo.
-- [ ] Política de rotación: por antigüedad (ej. borrar >7 días) y/o por espacio en disco.
-- [ ] Indexado de grabaciones en DB (cámara, timestamp inicio/fin, path del archivo).
-- [ ] UI para navegar grabaciones por cámara y rango de fecha/hora.
+- [ ] Orquestar grabación desde uCam (o daemon controlado por el store) en paralelo al live.
+- [ ] Estado UI `RECORDING` real por cámara.
+- [ ] Política de rotación (antigüedad y/o espacio en disco).
+- [ ] Índice de grabaciones (cámara, inicio/fin, path) — SQLite natural aquí.
+- [ ] Sección **Recordings** en el sidebar: navegar y reproducir (GStreamer sobre archivo).
 
-**Criterio de "hecho":** el sistema graba de forma continua durante días sin llenar el
-disco, y podés recuperar y reproducir un segmento de una fecha específica.
+**Criterio de "hecho":** graba días sin llenar el disco; recuperás un segmento por fecha
+desde la UI.
 
 ---
 
 ### Hito 6 — Detección de movimiento/objetos
-**Objetivo:** grabación inteligente en vez de puramente continua.
+**Objetivo:** grabación inteligente además de continua.
 
 Sub-objetivos:
-- [ ] Detección de movimiento simple con OpenCV (diferencia de frames).
-- [ ] (Opcional, más avanzado) Detección de objetos con un modelo liviano (YOLO nano).
-- [ ] Emisión de eventos que el sistema de grabación consume (grabar N segundos antes/después
-      del evento, marcar el segmento como "evento" en vez de "continuo").
-- [ ] Notificaciones básicas (webhook/log) cuando se detecta un evento.
+- [ ] Movimiento simple (OpenCV / diff de frames) o análisis sobre pipeline.
+- [ ] (Opcional) YOLO nano u otro modelo liviano.
+- [ ] Eventos → pre/post buffer de grabación; marca en el índice.
+- [ ] Sección **Events** + notificaciones básicas (log/webhook).
 
-**Criterio de "hecho":** el sistema distingue y marca segmentos "con movimiento" de los
-puramente continuos, consultable desde la UI.
+**Criterio de "hecho":** segmentos “con evento” distinguibles de los continuos en la UI.
 
 ---
 
-### Hito 7 (fase 2) — Migración del Stream Manager a Rust
-**Objetivo:** aprender concurrencia/systems programming aplicado a un problema real,
-una vez que la arquitectura ya está validada y estable en Python.
+### Hito 7 (fase 2) — Recording/Stream Manager en Rust
+**Objetivo:** systems programming sobre un problema real, **después** de validar
+arquitectura e integración en Python.
 
 Sub-objetivos:
-- [ ] Reescribir el Stream Manager como servicio Rust independiente (tokio + gstreamer-rs
-      o ffmpeg-next).
-- [ ] Definir el contrato de comunicación con el backend Python (HTTP/gRPC).
-- [ ] Migrar cámara por cámara (correr ambos en paralelo durante la transición, no un
-      big-bang switch).
-- [ ] Benchmark comparativo: uso de memoria/CPU del Stream Manager Python vs Rust con la
-      misma cantidad de cámaras.
+- [ ] Servicio Rust (tokio + gstreamer-rs o ffmpeg-next).
+- [ ] Contrato con el viewer/store (HTTP/gRPC/socket local).
+- [ ] Migración gradual (ambos en paralelo).
+- [ ] Benchmark memoria/CPU Python vs Rust con la misma cantidad de cámaras.
 
-**Criterio de "hecho":** el Stream Manager en Rust maneja todas las cámaras de forma
-estable, y tenés números concretos que muestran la diferencia de recursos vs la versión
-Python.
+**Criterio de "hecho":** el manager Rust sostiene todas las cámaras de forma estable y
+hay números comparativos.
+
+---
+
+### UI shell (trabajo transversal, no es un hito de streaming)
+
+La app ya tiene navegación esqueleto. Completar sin bloquear Hitos 4–5:
+
+| Sección | Estado |
+|---|---|
+| Cameras | Funcional (grid/list, add, delete, menú contextual) |
+| Dashboard | Placeholder / vacío |
+| Recordings | Vacío → Hito 5 |
+| Events | Vacío → Hito 6 |
+| Camera Management | Navega pero sin contenido real |
+| Settings / Support / Sign Out | Cosmético |
+| Favorites (top bar) | Cosmético |
+| Fullscreen / Reconnect (list row) | Botones sin lógica |
 
 ---
 
 ## 6. Convenciones de código
 
-- **Commits**: convención tipo Conventional Commits (`feat:`, `fix:`, `refactor:`, etc.),
-  un commit por sub-objetivo cuando sea razonable.
-- **Python**: type hints obligatorios en funciones públicas, `ruff` para linting.
-- **Rust**: `clippy` sin warnings antes de mergear, evitar `unwrap()` fuera de tests/prototipos.
-- **Nombres de servicios**: en inglés (`stream-manager`, `discovery-service`), UI/mensajes
-  de usuario en español.
-- **Credenciales de cámaras**: nunca en código ni en el repositorio — variables de entorno
-  o vault local, incluso en fase de prototipo casero.
+- **Commits**: Conventional Commits (`feat:`, `fix:`, `refactor:`, `doc:`, etc.).
+- **Python**: type hints en APIs públicas; preferir claridad sobre magia.
+- **UI / mensajes de usuario**: español o inglés según lo ya usado en la pantalla
+  (hoy la shell está mayormente en inglés: "Add Camera", "Cameras"); ser **consistente
+  por superficie**. Nombres de módulos/servicios en inglés (`stream-manager`,
+  `ucam_viewer`, `CameraStore`).
+- **Credenciales**: nunca commitear URLs con password ni meterlas en el skill/docs.
+  Usar env o store local. No loguear passwords en claro en nivel INFO.
+- **GStreamer**: al destruir un pipeline, orden fijo — `paintable=None` → `NULL` →
+  `get_state` wait — para evitar cuelgues/crashes (lección ya pagada en preview ONVIF).
+- **Un player por `rtsp_url`**: no spawnear un segundo pipeline solo por cambiar layout.
+- **Rust** (cuando aplique): `clippy` limpio; evitar `unwrap()` fuera de tests/prototipos.
 
 ---
 
 ## 7. Registro de decisiones (ADR-lite)
 
-| Fecha | Decisión | Alternativas consideradas | Motivo |
+| Fecha | Decisión | Alternativas | Motivo |
 |---|---|---|---|
-| Inicio | HLS en vez de WebRTC para v1 | WebRTC | Simplicidad de implementación, latencia aceptable para uso doméstico |
-| Inicio | Python en fase 1, Rust en fase 2 solo para Stream Manager | Rust desde el inicio en todo el sistema | Evitar sumar curva de aprendizaje del lenguaje + del dominio al mismo tiempo; Rust brilla específicamente en la concurrencia del Stream Manager |
-| Inicio | SQLite en vez de Postgres | Postgres desde el inicio | Cero fricción de setup para un proyecto de escala doméstica; migración es straightforward si hace falta |
-| Inicio | ONVIF/WS-Discovery + fallback nmap/arp-scan | Solo ONVIF | El usuario ya tiene un flujo de descubrimiento funcionando con nmap/arp-scan; no descartarlo, integrarlo como red de seguridad |
+| Inicio | Python fase 1; Rust solo para manager de streams/grabación en fase 2 | Rust en todo desde día 1 | No sumar lenguaje + dominio a la vez |
+| Inicio | SQLite (plan) / JSON ahora; no Postgres | Postgres de entrada | Escala doméstica; migración simple si hace falta |
+| Inicio | ONVIF + fallback nmap/arp-scan | Solo ONVIF | El usuario ya usa nmap/arp-scan; red de seguridad |
+| Inicio (obsoleta como v1) | HLS en vez de WebRTC para browser | WebRTC | Simplicidad si el cliente era web |
+| **2026-08** | **Frontend fase 1 = GTK4 + GStreamer (uCam), no React/HLS** | Seguir con HLS + hls.js; WebRTC | Live local con baja latencia, HW decode, sin transcode; el valor del Hito 2 se cumple en desktop |
+| **2026-08** | **HLS/API web = opcional acceso remoto futuro** | Web como UI principal | No bloquea grabación, discovery ni analítica en LAN |
+| **2026-08** | Live = GStreamer in-process; grabación = FFmpeg subprocess | Todo FFmpeg; todo GStreamer | Live necesita paintable GTK; grabación copy-segment es trivial y robusta con FFmpeg |
+| **2026-08** | decodebin3 + fallback único a decodebin | Pipeline H.264 explícito fijo | Mejor caps/HW; avdec_h264 explícito no renderizaba bien con gtk4paintablesink en pruebas |
+| **2026-08** | Persistencia inicial JSON en `~/.config/ucam` | SQLite de entrada | Iterar UI sin schema; store con API swappable |
+| **2026-08** | Un `CameraPlayer` compartido grid/lista | Un pipeline por vista | Evita doble sesión RTSP y carga en la cámara |
 
-> Agregar filas nuevas a esta tabla cada vez que se tome una decisión de arquitectura no
-> trivial durante el desarrollo, para no repetir la discusión más adelante.
+> Agregar filas cada vez que se tome una decisión de arquitectura no trivial.
 
 ---
 
-## 8. Próximo paso inmediato
+## 8. Estado actual y próximo paso
 
-Arrancar **Hito 1**: script Python que se conecte a una cámara real vía RTSP y comience a
-grabar segmentos a disco, con reconexión automática ante caídas.
+### Hecho (resumen)
+- Recorder CLI con reconexión (`stream-manager/recorder.py`).
+- Visor multi-cámara GTK4 con live RTSP, reconexión, grid/lista.
+- Add Camera RTSP y ONVIF (perfiles, preview, normalización de URL).
+- Persistencia JSON; menú contextual delete/config (config solo navega).
+- CSS modular; shell con secciones (solo Cameras con contenido).
+
+### No hecho / desacoplado
+- Viewer y recorder no se hablan.
+- Discovery de red automático.
+- Recordings / Events / Management / Dashboard reales.
+- Retención, índice SQLite, analítica, Rust.
+
+### Próximos pasos recomendados (en orden de coherencia)
+
+1. **UI shell útil**: Camera Management (editar/reconectar), Fullscreen, Reconnect;
+   placeholders honestos en el resto.
+2. **Integrar grabación al viewer** (Hito 5 light): REC por cámara + listado básico.
+3. **Discovery de red** (Hito 4).
+4. **SQLite + retención** cuando el índice de grabaciones lo exija.
+5. **Analítica** y **Rust** solo con lo anterior estable.
+
+Al implementar, **no** reintroducir React/HLS como dependencia del camino crítico salvo
+decisión explícita nueva en la tabla ADR y en esta sección.

@@ -9,10 +9,10 @@ from pathlib import Path
 
 from .models import CameraConfig
 
-logger = logging.getLogger("camnet.viewer")
+logger = logging.getLogger("ucam.viewer")
 
-CAMNET_DIR = Path.home() / ".config" / "camnet"
-CAMERAS_FILE = CAMNET_DIR / "cameras.json"
+UCAM_DIR = Path.home() / ".config" / "ucam"
+CAMERAS_FILE = UCAM_DIR / "cameras.json"
 
 
 class CameraStore:
@@ -36,7 +36,7 @@ class CameraStore:
         return cameras
 
     def save(self, cameras: list[CameraConfig]) -> None:
-        CAMNET_DIR.mkdir(parents=True, exist_ok=True)
+        UCAM_DIR.mkdir(parents=True, exist_ok=True)
         data = [{"name": c.name, "rtsp_url": c.rtsp_url} for c in cameras]
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         logger.info("Saved %d cameras to %s", len(cameras), self._path)

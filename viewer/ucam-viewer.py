@@ -10,7 +10,7 @@ _VENV_PYTHON = os.path.join(_VENV, "bin", "python3")
 if os.path.exists(_VENV_PYTHON) and sys.executable != _VENV_PYTHON:
     os.execv(_VENV_PYTHON, [_VENV_PYTHON] + sys.argv)
 
-from camnet_viewer.main import main
+from ucam_viewer.main import main
 
 if __name__ == "__main__":
     main()

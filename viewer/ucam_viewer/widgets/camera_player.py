@@ -14,7 +14,7 @@ from gi.repository import Gtk, Gst, GLib  # noqa: E402
 from ..models import CameraConfig, CameraStatus, CameraState
 from ..pipeline import build_pipeline
 
-logger = logging.getLogger("camnet.viewer")
+logger = logging.getLogger("ucam.viewer")
 
 
 class CameraPlayer:

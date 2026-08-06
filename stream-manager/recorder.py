@@ -12,7 +12,7 @@ Uso:
 
     O, para no exponer la contraseña en la lista de procesos del sistema
     (recomendado):
-        export CAMNET_RTSP_URL="rtsp://user:pass@192.168.1.50:554/stream1"
+        export UCAM_RTSP_URL="rtsp://user:pass@192.168.1.50:554/stream1"
         python3 recorder.py --camera-name entrada
 
 Requiere: ffmpeg y ffprobe instalados y disponibles en el PATH.
@@ -35,7 +35,7 @@ from pathlib import Path
 
 def setup_logging(camera_name: str, log_file: str | None) -> logging.Logger:
     """Configura logging a consola y, opcionalmente, a un archivo."""
-    logger = logging.getLogger(f"camnet.recorder.{camera_name}")
+    logger = logging.getLogger(f"ucam.recorder.{camera_name}")
     logger.setLevel(logging.INFO)
 
     fmt = logging.Formatter(
@@ -256,7 +256,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rtsp-url",
         default=None,
-        help="URL RTSP completa. Si no se pasa, se lee de la variable de entorno CAMNET_RTSP_URL "
+        help="URL RTSP completa. Si no se pasa, se lee de la variable de entorno UCAM_RTSP_URL "
              "(recomendado, evita exponer la contraseña en `ps aux`).",
     )
     parser.add_argument("--output-dir", default="./recordings", help="Directorio donde guardar los segmentos grabados")
@@ -270,11 +270,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    rtsp_url = args.rtsp_url or os.environ.get("CAMNET_RTSP_URL")
+    rtsp_url = args.rtsp_url or os.environ.get("UCAM_RTSP_URL")
     if not rtsp_url:
         print(
             "Error: no se especificó una URL RTSP. Usá --rtsp-url o la variable "
-            "de entorno CAMNET_RTSP_URL.",
+            "de entorno UCAM_RTSP_URL.",
             file=sys.stderr,
         )
         sys.exit(1)

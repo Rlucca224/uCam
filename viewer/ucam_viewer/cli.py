@@ -10,7 +10,7 @@ from .models import CameraConfig
 
 
 def parse_cameras() -> list[CameraConfig]:
-    """Obtiene cámaras desde --camera o CAMNET_RTSP_URL. Si no hay, retorna vacío."""
+    """Obtiene cámaras desde --camera o UCAM_RTSP_URL. Si no hay, retorna vacío."""
     cameras: list[CameraConfig] = []
 
     parser = argparse.ArgumentParser(description="CamNet — Visor nativo GTK4")
@@ -35,7 +35,7 @@ def parse_cameras() -> list[CameraConfig]:
         cameras.append(CameraConfig(name=name, rtsp_url=url))
 
     if not cameras:
-        env_url = os.environ.get("CAMNET_RTSP_URL")
+        env_url = os.environ.get("UCAM_RTSP_URL")
         if env_url:
             cameras.append(CameraConfig(name="Camera", rtsp_url=env_url))
 

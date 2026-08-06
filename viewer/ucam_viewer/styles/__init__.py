@@ -9,6 +9,8 @@ from gi.repository import Gtk, Gdk  # noqa: E402
 from .base import BASE_CSS
 from .camera import CAMERA_CSS
 from .dialog import DIALOG_CSS
+from .popover import POPOVER_CSS
+from .recordings import RECORDINGS_CSS
 from .sidebar import SIDEBAR_CSS
 from .topbar import TOPBAR_CSS
 
@@ -18,6 +20,8 @@ _STYLESHEET = "".join([
     TOPBAR_CSS,
     CAMERA_CSS,
     DIALOG_CSS,
+    POPOVER_CSS,
+    RECORDINGS_CSS,
 ])
 
 
