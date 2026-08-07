@@ -35,6 +35,7 @@ class RecordingRow(Gtk.Box):
         on_delete: object = None,
         on_select: object = None,
         select_mode: bool = False,
+        is_active: bool = False,
     ):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.recording = recording
@@ -44,6 +45,7 @@ class RecordingRow(Gtk.Box):
         self._on_select = on_select
         self._select_mode = select_mode
         self._selected = False
+        self.is_active = is_active
         self.set_hexpand(True)
         self.set_hexpand_set(True)
         self.set_margin_start(20)
@@ -79,7 +81,7 @@ class RecordingRow(Gtk.Box):
     def _on_row_clicked(self, _gesture, _n_press: int, x: float, y: float) -> None:
         if not self._select_mode:
             return
-        picked = self.pick(x, y)
+        picked = self.pick(x, y, Gtk.PickFlags.DEFAULT)
         node = picked
         while node is not None and node is not self:
             if node is self._check or node is self._actions or isinstance(node, Gtk.Button):
@@ -142,6 +144,7 @@ class RecordingRow(Gtk.Box):
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         actions.set_valign(Gtk.Align.CENTER)
+        self._actions = actions
         self.append(actions)
 
         play = icon_button("play_arrow", "Play", "recording-action-btn")
@@ -154,6 +157,7 @@ class RecordingRow(Gtk.Box):
 
         delete = icon_button("delete", "Delete", "recording-action-btn-danger")
         delete.connect("clicked", lambda _b: self._on_delete(self.recording))
+        delete.set_sensitive(not self.is_active)
         actions.append(delete)
 
     def _load_thumb(self) -> None:

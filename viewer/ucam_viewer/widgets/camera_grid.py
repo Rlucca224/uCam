@@ -6,6 +6,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
+from pathlib import Path
+
 from gi.repository import Gtk  # noqa: E402
 
 from ..models import CameraConfig
@@ -168,6 +170,14 @@ class CameraGrid(Gtk.Box):
 
         if camera.record:
             recorder.start()
+
+    def active_recording_paths(self) -> list[Path]:
+        out: list[Path] = []
+        for recorder in self._recorders.values():
+            path = recorder.current_recording_path()
+            if path is not None:
+                out.append(path)
+        return out
 
     def remove_camera(self, rtsp_url: str) -> None:
         self._cameras = [c for c in self._cameras if c.rtsp_url != rtsp_url]

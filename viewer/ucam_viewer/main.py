@@ -9,14 +9,17 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Gtk, Gdk  # noqa: E402
+from gi.repository import Gtk, Gdk, Gio, GLib  # noqa: E402
 
 from .cli import parse_cameras
 from .dialogs import AddCameraDialog
 from .models import CameraConfig
+from .onvif_discovery import discover_onvif_streams
 from .store import CameraStore
 from .styles import load_css
 from .widgets import Sidebar, TopBar, CameraGrid, RecordingsView
+
+logger = logging.getLogger(__name__)
 
 _SECTION_TITLES = {
     "dashboard": "Dashboard",
@@ -105,7 +108,10 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._stack.set_visible_child_name("cameras")
 
-        self._recordings_view = RecordingsView(self)
+        self._recordings_view = RecordingsView(
+            self,
+            active_paths_provider=self._grid.active_recording_paths,
+        )
         self._stack.add_named(self._recordings_view, "recordings")
         for section in ("dashboard", "events", "camera_management"):
             self._stack.add_named(self._empty_section(), section)
@@ -153,9 +159,24 @@ class MainWindow(Gtk.ApplicationWindow):
         self._store.save(self._cameras_list())
 
     def _on_delete_camera(self, camera: CameraConfig) -> None:
-        self._grid.remove_camera(camera.rtsp_url)
-        self._sidebar.set_camera_count(len(self._grid._cards))
-        self._store.save(self._cameras_list())
+        dialog = Gtk.AlertDialog(
+            modal=True,
+            message=f"Delete camera '{camera.name}'?",
+            detail="The camera will be removed from your list. Recordings are kept.",
+            buttons=["Cancel", "Delete"],
+        )
+        dialog.choose(self, None, self._on_delete_camera_response, camera)
+
+    def _on_delete_camera_response(
+        self, _dialog: Gtk.AlertDialog, result: Gio.AsyncResult, camera: CameraConfig
+    ) -> None:
+        try:
+            if _dialog.choose_finish(result) == 1:
+                self._grid.remove_camera(camera.rtsp_url)
+                self._sidebar.set_camera_count(len(self._grid._cards))
+                self._store.save(self._cameras_list())
+        except GLib.Error as exc:
+            logger.warning("Delete camera failed: %s", exc)
 
     def _on_config_camera(self, camera: CameraConfig) -> None:
         self._navigate("camera_management")

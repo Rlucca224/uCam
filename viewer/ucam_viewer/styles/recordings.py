@@ -284,10 +284,6 @@ dropdown.recordings-filter popover listitem:active {
   margin-right: 4px;
 }
 
-.recording-row-selected {
-  background-color: #222228;
-}
-
 /* ===== Empty state ===== */
 
 .recordings-empty-icon {

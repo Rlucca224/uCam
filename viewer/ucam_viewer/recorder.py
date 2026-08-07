@@ -52,6 +52,23 @@ class RecordingController:
     def is_recording(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    def current_recording_path(self) -> Path | None:
+        """Path of the segment ffmpeg is currently writing, if recording."""
+        if not self.is_recording or not self.output_dir.exists():
+            return None
+        newest: Path | None = None
+        for p in self.output_dir.iterdir():
+            if not p.is_file() or p.suffix.lower() != ".mp4":
+                continue
+            if not p.name.startswith(f"{self.camera_name}_"):
+                continue
+            try:
+                if newest is None or p.stat().st_mtime > newest.stat().st_mtime:
+                    newest = p
+            except OSError:
+                continue
+        return newest
+
     def add_state_listener(self, cb: object) -> None:
         self._state_listeners.append(cb)
 

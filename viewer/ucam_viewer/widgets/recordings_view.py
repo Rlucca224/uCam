@@ -29,11 +29,17 @@ logger = logging.getLogger("ucam.viewer")
 class RecordingsView(Gtk.Box):
     __gtype_name__ = "RecordingsView"
 
-    def __init__(self, parent_window: Gtk.Window, recordings_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        parent_window: Gtk.Window,
+        recordings_dir: Path | None = None,
+        active_paths_provider: object = None,
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_hexpand(True)
         self.set_vexpand(True)
         self._parent_window = parent_window
+        self._active_paths_provider = active_paths_provider
         self._dir = recordings_dir or RECORDINGS_DIR
         self._recordings: list[RecordingInfo] = []
         self._filter_cameras: list[str] = []
@@ -195,6 +201,14 @@ class RecordingsView(Gtk.Box):
             return True
         return False
 
+    def _active_paths(self) -> list[Path]:
+        if self._active_paths_provider is None:
+            return []
+        try:
+            return list(self._active_paths_provider())
+        except Exception:  # noqa: BLE001
+            return []
+
     def _rebuild(self) -> None:
         for row in self._rows:
             self._list.remove(row)
@@ -208,6 +222,8 @@ class RecordingsView(Gtk.Box):
             r for r in self._recordings if camera is None or r.camera_name == camera
         ]
 
+        active = set(self._active_paths())
+
         if not filtered:
             self._empty_state()
             self._exit_select_mode()
@@ -220,6 +236,7 @@ class RecordingsView(Gtk.Box):
                     on_delete=self._on_delete,
                     on_select=self._on_row_select,
                     select_mode=self._select_mode,
+                    is_active=rec.path in active,
                 )
                 if self._select_mode:
                     row.set_selected(rec.path in self._selected)
@@ -320,11 +337,24 @@ class RecordingsView(Gtk.Box):
         self._select_tool_btn.set_label("Cancel" if self._select_mode else "Select")
         self._select_tool_btn.set_visible(has_rows or self._select_mode)
         self._footer_revealer.set_reveal_child(self._select_mode and has_rows)
-        self._footer_label.set_label(f"Select to delete ({n}) videos")
-        all_selected = has_rows and self._selected and len(self._selected) == len(self._rows)
+        self._footer_label.set_label(f"({n}) selected videos")
+        selectable = [row for row in self._rows if not row.is_active]
+        all_selected = (
+            bool(selectable)
+            and self._selected
+            and len(self._selected) == len(self._rows)
+        )
         self._footer_select_all.set_label("Deselect" if all_selected else "Select All")
         self._footer_select_all.set_sensitive(has_rows)
-        self._footer_delete.set_sensitive(n > 0)
+        self._footer_delete.set_sensitive(
+            n > 0 and not self._selected_contains_active()
+        )
+
+    def _selected_contains_active(self) -> bool:
+        if not self._selected:
+            return False
+        active = set(self._active_paths())
+        return any(path in active for path in self._selected)
 
     def _confirm_delete_selected(self) -> None:
         n = len(self._selected)
