@@ -23,6 +23,7 @@ class CameraStatus(Enum):
 class CameraConfig:
     name: str
     rtsp_url: str
+    record: bool = False
 
 
 @dataclass

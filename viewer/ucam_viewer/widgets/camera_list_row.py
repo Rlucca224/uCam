@@ -21,13 +21,16 @@ class CameraListRow(Gtk.Box):
         self,
         camera: CameraConfig,
         player: CameraPlayer | None = None,
+        recorder: RecordingController | None = None,
         on_delete: object = None,
         on_config: object = None,
+        on_record: object = None,
     ):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.camera = camera
         self._on_delete = on_delete
         self._on_config = on_config
+        self._on_record = on_record
         self.set_hexpand(True)
         self.set_vexpand(False)
         self.set_size_request(-1, 155)
@@ -37,11 +40,12 @@ class CameraListRow(Gtk.Box):
 
         self._own_player = player is None
         self._player = player or CameraPlayer(camera)
-        self._recorder = RecordingController(camera.name, camera.rtsp_url)
-        self._recording = False
+        self._recorder = recorder or RecordingController(camera.name, camera.rtsp_url)
+        self._recording = self._recorder.is_recording
         self._player.add_status_listener(self._update_status_ui)
         self._player.add_paintable_listener(self._on_paintable)
         self._player.add_info_listener(self._update_info)
+        self._recorder.add_state_listener(self._on_recording_changed)
         self._uptime_source: int | None = None
         self._build_ui()
         self._setup_context_menu()
@@ -98,7 +102,12 @@ class CameraListRow(Gtk.Box):
             self._recorder.stop()
         else:
             self._recorder.start()
-        self._recording = self._recorder.is_recording
+        self.camera.record = self._recorder.is_recording
+        if self._on_record is not None:
+            self._on_record(self.camera)
+
+    def _on_recording_changed(self, is_recording: bool) -> None:
+        self._recording = is_recording
         self._update_status_ui(self._player.state.status)
 
     def _build_ui(self) -> None:

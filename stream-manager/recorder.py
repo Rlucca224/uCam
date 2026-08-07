@@ -260,7 +260,7 @@ def parse_args() -> argparse.Namespace:
              "(recomendado, evita exponer la contraseña en `ps aux`).",
     )
     parser.add_argument("--output-dir", default="./recordings", help="Directorio donde guardar los segmentos grabados")
-    parser.add_argument("--segment-seconds", type=int, default=300, help="Duración de cada segmento grabado, en segundos (default: 300 = 5 min)")
+    parser.add_argument("--segment-seconds", type=int, default=3600, help="Duración de cada segmento grabado, en segundos (default: 3600 = 1 hora)")
     parser.add_argument("--rtsp-timeout-seconds", type=int, default=10, help="Timeout de conexión/lectura RTSP, en segundos")
     parser.add_argument("--log-file", default=None, help="Ruta opcional a un archivo de log (además de stdout)")
     parser.add_argument("--verbose", action="store_true", help="Incluye el output crudo de ffmpeg en los logs (nivel DEBUG)")

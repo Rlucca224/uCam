@@ -20,6 +20,7 @@ from ..recordings import (
     human_size,
     scan_recordings,
 )
+from .helpers import icon_button
 from .recording_row import RecordingRow
 
 logger = logging.getLogger("ucam.viewer")
@@ -37,11 +38,18 @@ class RecordingsView(Gtk.Box):
         self._recordings: list[RecordingInfo] = []
         self._filter_cameras: list[str] = []
         self._rows: list[RecordingRow] = []
+        self._empty_widget: Gtk.Widget | None = None
+        self._select_mode = False
+        self._selected: list[Path] = []
 
         self._build_toolbar()
         self._build_list()
 
         self._setup_monitor()
+
+        esc = Gtk.EventControllerKey()
+        esc.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(esc)
 
     def _build_toolbar(self) -> None:
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
@@ -63,6 +71,12 @@ class RecordingsView(Gtk.Box):
         self._subtitle.set_halign(Gtk.Align.START)
         heading.append(self._subtitle)
 
+        self._select_tool_btn = Gtk.Button(label="Select")
+        self._select_tool_btn.add_css_class("recordings-refresh-btn")
+        self._select_tool_btn.set_valign(Gtk.Align.CENTER)
+        self._select_tool_btn.connect("clicked", lambda _b: self._toggle_select_mode())
+        toolbar.append(self._select_tool_btn)
+
         self._filter = Gtk.DropDown()
         self._filter.add_css_class("recordings-filter")
         self._filter.connect("notify::selected", self._on_filter_changed)
@@ -76,19 +90,57 @@ class RecordingsView(Gtk.Box):
         toolbar.append(refresh)
 
     def _build_list(self) -> None:
+        self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._body.set_vexpand(True)
+        self.append(self._body)
+
         self._scrolled = Gtk.ScrolledWindow()
         self._scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._scrolled.set_vexpand(True)
-        self.append(self._scrolled)
+        self._body.append(self._scrolled)
 
         self._list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._list.set_vexpand(True)
         self._scrolled.set_child(self._list)
 
+        self._footer_revealer = Gtk.Revealer()
+        self._footer_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
+        self._footer_revealer.set_reveal_child(False)
+
+        self._footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self._footer.add_css_class("recordings-footer")
+        self._footer.set_hexpand(True)
+        self._footer_revealer.set_child(self._footer)
+        self._body.append(self._footer_revealer)
+        self._build_footer_content()
+
+    def _build_footer_content(self) -> None:
+        label = Gtk.Label(label="Select to delete (0) videos")
+        label.add_css_class("button-text")
+        label.add_css_class("recordings-footer-label")
+        label.set_hexpand(True)
+        label.set_halign(Gtk.Align.START)
+        self._footer_label = label
+        self._footer.append(label)
+
+        self._footer_select_all = Gtk.Button(label="Select All")
+        self._footer_select_all.add_css_class("recordings-footer-btn")
+        self._footer_select_all.connect("clicked", lambda _b: self._toggle_select_all())
+        self._footer.append(self._footer_select_all)
+
+        self._footer_delete = icon_button("delete", "Delete", "recordings-footer-btn-danger")
+        self._footer_delete.connect("clicked", lambda _b: self._confirm_delete_selected())
+        self._footer.append(self._footer_delete)
+
+        self._update_footer_state()
+
     def _empty_state(self) -> None:
         for row in self._rows:
             self._list.remove(row)
         self._rows = []
+        if self._empty_widget is not None:
+            self._list.remove(self._empty_widget)
+            self._empty_widget = None
 
         empty = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         empty.set_valign(Gtk.Align.CENTER)
@@ -107,6 +159,7 @@ class RecordingsView(Gtk.Box):
         text.set_justify(Gtk.Justification.CENTER)
         empty.append(text)
 
+        self._empty_widget = empty
         self._list.append(empty)
 
     def refresh(self) -> None:
@@ -116,6 +169,7 @@ class RecordingsView(Gtk.Box):
 
     def _update_filter_model(self) -> None:
         cameras = sorted({r.camera_name for r in self._recordings})
+        self._filter.set_sensitive(bool(self._recordings))
         if cameras == self._filter_cameras:
             return
         self._filter_cameras = cameras
@@ -131,12 +185,23 @@ class RecordingsView(Gtk.Box):
         return None
 
     def _on_filter_changed(self, _dropdown, _pspec) -> None:
+        self._exit_select_mode()
         self._rebuild()
+
+    def _on_key_pressed(self, _controller, keyval, _code, _mods) -> bool:
+        if keyval == 0xFF1B and self._select_mode:  # Escape
+            self._exit_select_mode()
+            self._rebuild()
+            return True
+        return False
 
     def _rebuild(self) -> None:
         for row in self._rows:
             self._list.remove(row)
         self._rows = []
+        if self._empty_widget is not None:
+            self._list.remove(self._empty_widget)
+            self._empty_widget = None
 
         camera = self._selected_camera()
         filtered = [
@@ -145,6 +210,7 @@ class RecordingsView(Gtk.Box):
 
         if not filtered:
             self._empty_state()
+            self._exit_select_mode()
         else:
             for rec in filtered:
                 row = RecordingRow(
@@ -152,9 +218,14 @@ class RecordingsView(Gtk.Box):
                     on_play=self._on_play,
                     on_open_folder=self._on_open_folder,
                     on_delete=self._on_delete,
+                    on_select=self._on_row_select,
+                    select_mode=self._select_mode,
                 )
+                if self._select_mode:
+                    row.set_selected(rec.path in self._selected)
                 self._rows.append(row)
                 self._list.append(row)
+        self._update_footer_state()
 
         total = sum(r.size for r in self._recordings)
         if filtered != self._recordings:
@@ -190,6 +261,98 @@ class RecordingsView(Gtk.Box):
         self._pending_refresh = None
         self.refresh()
         return False
+
+    # -- Selection ------------------------------------------------------
+
+    def _toggle_select_mode(self) -> None:
+        if self._select_mode:
+            self._exit_select_mode()
+        else:
+            self._enter_select_mode()
+
+    def _enter_select_mode(self) -> None:
+        self._selected = []
+        self._select_mode = True
+        for row in self._rows:
+            row.set_select_mode(True)
+            row.set_selected(False)
+        self._update_footer_state()
+
+    def _exit_select_mode(self) -> None:
+        self._select_mode = False
+        self._selected = []
+        for row in self._rows:
+            row.set_select_mode(False)
+            row.set_selected(False)
+        self._update_footer_state()
+
+    def _on_row_select(self, recording: RecordingInfo, selected: bool) -> None:
+        if selected:
+            if recording.path not in self._selected:
+                self._selected.append(recording.path)
+        else:
+            if recording.path in self._selected:
+                self._selected.remove(recording.path)
+        self._update_footer_state()
+
+    def _toggle_select_all(self) -> None:
+        if self._selected and len(self._selected) == len(self._rows):
+            self._deselect_all()
+        else:
+            self._select_all()
+
+    def _select_all(self) -> None:
+        paths = [row.recording.path for row in self._rows]
+        self._selected = paths
+        for row in self._rows:
+            row.set_selected(True)
+        self._update_footer_state()
+
+    def _deselect_all(self) -> None:
+        self._selected = []
+        for row in self._rows:
+            row.set_selected(False)
+        self._update_footer_state()
+
+    def _update_footer_state(self) -> None:
+        n = len(self._selected)
+        has_rows = bool(self._rows)
+        self._select_tool_btn.set_label("Cancel" if self._select_mode else "Select")
+        self._select_tool_btn.set_visible(has_rows or self._select_mode)
+        self._footer_revealer.set_reveal_child(self._select_mode and has_rows)
+        self._footer_label.set_label(f"Select to delete ({n}) videos")
+        all_selected = has_rows and self._selected and len(self._selected) == len(self._rows)
+        self._footer_select_all.set_label("Deselect" if all_selected else "Select All")
+        self._footer_select_all.set_sensitive(has_rows)
+        self._footer_delete.set_sensitive(n > 0)
+
+    def _confirm_delete_selected(self) -> None:
+        n = len(self._selected)
+        if n == 0:
+            return
+        dialog = Gtk.AlertDialog(
+            modal=True,
+            message=f"Delete {n} recording(s)?",
+            detail="The selected recordings will be permanently removed.",
+            buttons=["Cancel", "Delete"],
+        )
+        dialog.choose(self._parent_window, None, self._on_delete_selected_response, n)
+
+    def _on_delete_selected_response(
+        self, _dialog: Gtk.AlertDialog, result: Gio.AsyncResult, n: int
+    ) -> None:
+        try:
+            if _dialog.choose_finish(result) == 1:
+                for path in self._selected:
+                    try:
+                        path.unlink()
+                    except OSError as exc:
+                        logger.warning("Delete failed for %s: %s", path, exc)
+                self._select_mode = True
+                self._exit_select_mode()
+                self.refresh()
+        except GLib.Error as exc:
+            logger.warning("Delete selected failed: %s", exc)
 
     # -- Actions --------------------------------------------------------
 

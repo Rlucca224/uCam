@@ -9,6 +9,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
 from ..models import CameraConfig
+from ..recorder import RecordingController
 from .camera_card import CameraCard
 from .camera_list_row import CameraListRow
 from .camera_player import CameraPlayer
@@ -22,14 +23,17 @@ class CameraGrid(Gtk.Box):
         cameras: list[CameraConfig],
         on_delete: object = None,
         on_config: object = None,
+        on_record: object = None,
     ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._cameras = list(cameras)
         self._players: dict[str, CameraPlayer] = {}
+        self._recorders: dict[str, RecordingController] = {}
         self._cards: list[CameraCard] = []
         self._rows: list[CameraListRow] = []
         self._on_delete = on_delete
         self._on_config = on_config
+        self._on_record = on_record
         self._layout = ""
         self.add_css_class("camera-grid-container")
 
@@ -68,6 +72,9 @@ class CameraGrid(Gtk.Box):
         for cam in self._cameras:
             player = CameraPlayer(cam)
             self._players[cam.rtsp_url] = player
+            self._recorders[cam.rtsp_url] = RecordingController(
+                cam.name, cam.rtsp_url
+            )
 
         self._build_grid()
         self._build_list()
@@ -75,6 +82,10 @@ class CameraGrid(Gtk.Box):
 
         for player in self._players.values():
             player.start()
+
+        for cam in self._cameras:
+            if cam.record:
+                self._recorders[cam.rtsp_url].start()
 
     def _build_grid(self) -> None:
         for card in self._cards:
@@ -85,8 +96,10 @@ class CameraGrid(Gtk.Box):
             card = CameraCard(
                 cam,
                 player=player,
+                recorder=self._recorders[cam.rtsp_url],
                 on_delete=self._on_delete,
                 on_config=self._on_config,
+                on_record=self._on_record,
             )
             self._cards.append(card)
             self._flow.append(card)
@@ -100,8 +113,10 @@ class CameraGrid(Gtk.Box):
             row = CameraListRow(
                 cam,
                 player=player,
+                recorder=self._recorders[cam.rtsp_url],
                 on_delete=self._on_delete,
                 on_config=self._on_config,
+                on_record=self._on_record,
             )
             self._rows.append(row)
             self._list_box.append(row)
@@ -124,12 +139,16 @@ class CameraGrid(Gtk.Box):
         self._cameras.append(camera)
         player = CameraPlayer(camera)
         self._players[camera.rtsp_url] = player
+        recorder = RecordingController(camera.name, camera.rtsp_url)
+        self._recorders[camera.rtsp_url] = recorder
 
         card = CameraCard(
             camera,
             player=player,
+            recorder=recorder,
             on_delete=self._on_delete,
             on_config=self._on_config,
+            on_record=self._on_record,
         )
         self._cards.append(card)
         self._flow.append(card)
@@ -137,19 +156,28 @@ class CameraGrid(Gtk.Box):
         row = CameraListRow(
             camera,
             player=player,
+            recorder=recorder,
             on_delete=self._on_delete,
             on_config=self._on_config,
+            on_record=self._on_record,
         )
         self._rows.append(row)
         self._list_box.append(row)
 
         player.start()
 
+        if camera.record:
+            recorder.start()
+
     def remove_camera(self, rtsp_url: str) -> None:
         self._cameras = [c for c in self._cameras if c.rtsp_url != rtsp_url]
         player = self._players.pop(rtsp_url, None)
         if player is not None:
             player.stop()
+
+        recorder = self._recorders.pop(rtsp_url, None)
+        if recorder is not None:
+            recorder.stop()
 
         for i, card in enumerate(self._cards):
             if card.camera.rtsp_url == rtsp_url:
@@ -170,5 +198,7 @@ class CameraGrid(Gtk.Box):
             card.stop()
         for row in self._rows:
             row.stop()
+        for recorder in self._recorders.values():
+            recorder.stop()
         for player in self._players.values():
             player.stop()

@@ -90,6 +90,7 @@ class MainWindow(Gtk.ApplicationWindow):
             cameras,
             on_delete=self._on_delete_camera,
             on_config=self._on_config_camera,
+            on_record=self._on_record_changed,
         )
 
         topbar = TopBar(on_layout_change=self._grid.set_layout)
@@ -131,9 +132,16 @@ class MainWindow(Gtk.ApplicationWindow):
         for card in self._grid._cards:
             if card.camera is not None:
                 cameras.append(
-                    CameraConfig(name=card.camera.name, rtsp_url=card.camera.rtsp_url)
+                    CameraConfig(
+                        name=card.camera.name,
+                        rtsp_url=card.camera.rtsp_url,
+                        record=card.camera.record,
+                    )
                 )
         return cameras
+
+    def _on_record_changed(self, camera: CameraConfig) -> None:
+        self._store.save(self._cameras_list())
 
     def _on_add_device(self) -> None:
         dialog = AddCameraDialog(self, on_add=self._add_camera)

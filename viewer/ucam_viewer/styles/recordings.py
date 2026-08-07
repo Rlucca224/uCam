@@ -27,6 +27,11 @@ RECORDINGS_CSS = """
   padding: 6px 10px;
 }
 
+.recordings-filter:disabled {
+  color: #7a7a80;
+  opacity: 0.75;
+}
+
 /* popup del dropdown alineado al ancho del boton */
 dropdown.recordings-filter popover.background,
 dropdown.recordings-filter popover {
@@ -212,6 +217,75 @@ dropdown.recordings-filter popover listitem:active {
 .recording-action-btn-danger:hover {
   background-color: #2a1c1c;
   border-color: #ffb4ab;
+}
+
+/* ===== Selection footer ===== */
+
+.recordings-footer {
+  background: #161618;
+  border-top: 1px solid #26262a;
+  padding: 10px 20px;
+}
+
+.recordings-footer-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.recordings-footer-btn {
+  background-color: #1b1b1b;
+  border: 1px solid #262626;
+  border-radius: 5px;
+  padding: 6px 12px;
+  min-height: 0px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.recordings-footer-btn .material-icon {
+  font-size: 13px;
+  min-width: 0px;
+}
+
+.recordings-footer-btn .button-text {
+  font-size: 13px;
+}
+
+.recordings-footer-btn:hover {
+  background-color: #1f1f1f;
+}
+
+.recordings-footer-btn-danger {
+  background-color: #301414;
+  color: #ffb4ab;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 12px;
+  min-height: 0px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.recordings-footer-btn-danger .material-icon {
+  font-size: 13px;
+  min-width: 0px;
+}
+
+.recordings-footer-btn-danger .button-text {
+  font-size: 13px;
+}
+
+.recordings-footer-btn-danger:hover {
+  background-color: #3a1a1a;
+}
+
+.recording-check {
+  margin-right: 4px;
+}
+
+.recording-row-selected {
+  background-color: #222228;
 }
 
 /* ===== Empty state ===== */

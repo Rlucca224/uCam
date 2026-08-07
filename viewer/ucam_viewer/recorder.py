@@ -22,7 +22,7 @@ class RecordingController:
         camera_name: str,
         rtsp_url: str,
         output_dir: Path | None = None,
-        segment_seconds: int = 60,
+        segment_seconds: int = 3600,
         rtsp_timeout_seconds: int = 10,
     ) -> None:
         self.camera_name = camera_name
@@ -33,6 +33,7 @@ class RecordingController:
         self._recorder: Recorder | None = None
         self._thread: threading.Thread | None = None
         self._logger = self._make_logger()
+        self._state_listeners: list = []
 
     def _make_logger(self) -> logging.Logger:
         logger = logging.getLogger(f"ucam.recorder.{self.camera_name}")
@@ -51,6 +52,14 @@ class RecordingController:
     def is_recording(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    def add_state_listener(self, cb: object) -> None:
+        self._state_listeners.append(cb)
+
+    def _notify_state(self) -> None:
+        is_recording = self.is_recording
+        for cb in self._state_listeners:
+            cb(is_recording)
+
     def start(self) -> None:
         if self.is_recording:
             return
@@ -68,6 +77,7 @@ class RecordingController:
             daemon=True,
         )
         self._thread.start()
+        self._notify_state()
 
     def stop(self) -> None:
         if self._recorder is not None:
@@ -76,3 +86,4 @@ class RecordingController:
             self._thread.join(timeout=5)
         self._recorder = None
         self._thread = None
+        self._notify_state()

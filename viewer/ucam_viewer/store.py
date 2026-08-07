@@ -32,12 +32,21 @@ class CameraStore:
         cameras: list[CameraConfig] = []
         for entry in data:
             if isinstance(entry, dict) and "name" in entry and "rtsp_url" in entry:
-                cameras.append(CameraConfig(name=entry["name"], rtsp_url=entry["rtsp_url"]))
+                cameras.append(
+                    CameraConfig(
+                        name=entry["name"],
+                        rtsp_url=entry["rtsp_url"],
+                        record=bool(entry.get("record", False)),
+                    )
+                )
         return cameras
 
     def save(self, cameras: list[CameraConfig]) -> None:
         UCAM_DIR.mkdir(parents=True, exist_ok=True)
-        data = [{"name": c.name, "rtsp_url": c.rtsp_url} for c in cameras]
+        data = [
+            {"name": c.name, "rtsp_url": c.rtsp_url, "record": c.record}
+            for c in cameras
+        ]
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         logger.info("Saved %d cameras to %s", len(cameras), self._path)
 

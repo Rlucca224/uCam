@@ -33,12 +33,17 @@ class RecordingRow(Gtk.Box):
         on_play: object = None,
         on_open_folder: object = None,
         on_delete: object = None,
+        on_select: object = None,
+        select_mode: bool = False,
     ):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.recording = recording
         self._on_play = on_play
         self._on_open_folder = on_open_folder
         self._on_delete = on_delete
+        self._on_select = on_select
+        self._select_mode = select_mode
+        self._selected = False
         self.set_hexpand(True)
         self.set_hexpand_set(True)
         self.set_margin_start(20)
@@ -46,11 +51,55 @@ class RecordingRow(Gtk.Box):
         self.set_margin_bottom(8)
         self.add_css_class("recording-row")
 
+        gesture = Gtk.GestureClick()
+        gesture.connect("released", self._on_row_clicked)
+        self.add_controller(gesture)
+
         self._build_ui()
         self._load_thumb()
         self._load_duration()
 
+    def set_select_mode(self, mode: bool) -> None:
+        self._select_mode = mode
+        self._check.set_visible(mode)
+
+    def set_selected(self, selected: bool) -> None:
+        if self._check.get_active() != selected:
+            self._check.set_active(selected)
+        else:
+            self._update_selected_ui()
+
+    def _update_selected_ui(self) -> None:
+        self._selected = self._check.get_active()
+        if self._selected:
+            self.add_css_class("recording-row-selected")
+        else:
+            self.remove_css_class("recording-row-selected")
+
+    def _on_row_clicked(self, _gesture, _n_press: int, x: float, y: float) -> None:
+        if not self._select_mode:
+            return
+        picked = self.pick(x, y)
+        node = picked
+        while node is not None and node is not self:
+            if node is self._check or node is self._actions or isinstance(node, Gtk.Button):
+                return
+            node = node.get_parent()
+        self.set_selected(not self._check.get_active())
+
+    def _on_toggled(self, _check) -> None:
+        self._update_selected_ui()
+        if self._on_select is not None:
+            self._on_select(self.recording, self._selected)
+
     def _build_ui(self) -> None:
+        self._check = Gtk.CheckButton()
+        self._check.add_css_class("recording-check")
+        self._check.set_visible(self._select_mode)
+        self._check.set_valign(Gtk.Align.CENTER)
+        self._check.connect("toggled", self._on_toggled)
+        self.append(self._check)
+
         thumb_box = Gtk.Overlay()
         thumb_box.add_css_class("recording-thumb")
         thumb_box.set_size_request(160, 90)
